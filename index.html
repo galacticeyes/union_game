@@ -1,0 +1,1984 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>飞机大战 - 动漫风弹幕版</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #gameContainer {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+      background: transparent;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+    }
+    #bgVideo {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+      pointer-events: none;
+      display: block;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      z-index: 2;
+    }
+    #overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      z-index: 3;
+    }
+    #overlay .center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+    #overlay button {
+      pointer-events: auto;
+      padding: 10px 24px;
+      font-size: 20px;
+      margin-top: 16px;
+      cursor: pointer;
+    }
+    #overlay h1 {
+      margin-bottom: 8px;
+    }
+    #overlay p {
+      margin: 4px 0;
+    }
+    #stateLabel {
+      position: absolute;
+      left: 20px;
+      top: 20px;
+      font-size: 18px;
+      text-shadow: 0 0 4px #000;
+    }
+    .gif-render-element {
+      position: absolute;
+      z-index: 1;
+      pointer-events: none;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+<div id="gameContainer">
+  <video id="bgVideo" autoplay loop muted playsinline preload="auto" style="pointer-events: none;">
+    <source src="bg_soul_scroll_light_h254.mp4" type="video/mp4">
+  </video>
+  <canvas id="gameCanvas" width="1080" height="1920"></canvas>
+  <div id="overlay">
+    <div id="stateLabel"></div>
+    <div class="center" id="menuScreen">
+      <h1>飞机大战 - 动漫风弹幕版</h1>
+      <p>控制方式：鼠标移动飞机（机头朝上），自动射击</p>
+      <p>提示：按空格或点击下方按钮开始游戏</p>
+      <button id="startButton">开始游戏</button>
+    </div>
+    <div class="center" id="gameOverScreen" style="display:none;">
+      <h1>游戏结束</h1>
+      <p id="gameOverDesc"></p>
+      <button id="restartButton">重新开始</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ======== 背景视频初始化 ========
+(function() {
+  const video = document.getElementById('bgVideo');
+  let playAttempted = false;
+  
+  console.log('🎬 视频元素:', video);
+  console.log('📹 视频 src:', video.querySelector('source').src);
+  
+  video.addEventListener('loadstart', () => console.log('✅ 视频开始加载'));
+  video.addEventListener('loadedmetadata', () => {
+    console.log('✅ 视频元数据已加载');
+    console.log(`📊 视频尺寸: ${video.videoWidth} x ${video.videoHeight}`);
+  });
+  video.addEventListener('loadeddata', () => console.log('✅ 视频数据已加载'));
+  video.addEventListener('canplay', () => {
+    console.log('✅ 视频可以播放');
+    // 只在视频可以播放时尝试一次
+    if (!playAttempted) {
+      playAttempted = true;
+      tryPlayVideo();
+    }
+  });
+  video.addEventListener('playing', () => console.log('✅ 视频正在播放'));
+  video.addEventListener('pause', () => console.log('⏸️ 视频暂停'));
+  video.addEventListener('error', (e) => {
+    console.error('❌ 视频加载错误:', e);
+    if (video.error) {
+      console.error('❌ 错误详情:', {
+        code: video.error.code,
+        message: video.error.message
+      });
+    }
+  });
+  
+  function tryPlayVideo() {
+    if (video.paused) {
+      video.play().then(() => {
+        console.log('✅ 播放成功');
+      }).catch(err => {
+        console.warn('⚠️ 自动播放失败 (可能需要用户交互):', err.message);
+        // 在用户点击开始按钮时播放
+        const startBtn = document.getElementById('startButton');
+        if (startBtn) {
+          const playOnClick = () => {
+            video.play().catch(e => console.error('播放失败:', e));
+            startBtn.removeEventListener('click', playOnClick);
+          };
+          startBtn.addEventListener('click', playOnClick);
+        }
+      });
+    }
+  }
+})();
+
+/*
+  核心约束与实现说明（已落实到代码中）：
+  - 物理参数全部取自 GameManifest.meta.physicsConfig；
+  - 所有逻辑尺寸 / 碰撞盒来自 GameManifest.entities.*.logicSize；
+  - 鼠标跟随控制：每帧 player.center = 鼠标位置，并做边界 Clamp（禁止超出画布）；
+  - 玩家子弹自动全速发射，射速 = 当前攻击等级 fireRate（发/秒），使用冷却计时器；
+  - 玩家子弹朝上 (0,-1)，速度=1200 像素/秒；
+  - 敌机与敌弹朝下 (0,1)，Boss 额外有全向 / 跟踪弹；
+  - 敌机数量：低级 10、中级 5、Boss 1，按 GDD 波次规则刷新；
+  - 掉落顺序严格：低级→中级→Boss，使用全局阶段标志，保证每种攻击奖励只掉一次；
+  - 所有奖励掉落物竖直向下，速度 260 像素/秒，快于任意敌机竖直速度；
+  - Boss 三种子弹模式可叠加（普通、跟踪、群发），独立冷却；
+  - Boss 跟踪弹转向角速度上限 90°/秒；
+  - 撞击与子弹命中均使用 AABB，根据 logicSize 构造碰撞盒；
+  - 边界约束：玩家与所有敌机 / Boss 均不允许飞出逻辑可见区；
+  - 碰撞穿越时立即位置修正并清空对应方向速度（主要用于敌机/Boss 的边界反弹与 Clamp）；
+  - 渲染：使用一个 canvas+原生 JS 的主循环 (requestAnimationFrame)；
+  - 所有 GIF 路径与 GameManifest.assets.src 完全一致；使用等比例缩放 scale=min(logicW/texW,logicH/texH)，居中绘制。
+*/
+
+/* ======== GameManifest（硬编码结构） ======== */
+const GameManifest = {
+  meta: {
+    gameTitle: "飞机大战 - 动漫风弹幕版",
+    screenSize: { width: 1080, height: 1920 },
+    physicsConfig: {
+      gravity: 0,
+      jumpVelocity: 0,
+      moveSpeed: 600,
+      playerBulletSpeed: 1200,
+      enemySpeedLow: 200,
+      enemySpeedMidVertical: 300,
+      enemySpeedMidHorizontal: 150,
+      enemySpeedBoss: 250,
+      enemySpeedBoss23: 375, // 1.5倍速度
+      enemyBulletSpeedLow: 400,
+      enemyBulletSpeedMid: 550,
+      bossBulletSpeedNormal: 650,
+      bossBulletSpeedTrack: 400,
+      bossBulletSpeedSpread: 300,
+      playerAtkRateLv1: 3,
+      playerAtkRateLv2: 4,
+      playerAtkRateLv3: 6,
+      playerAtkRateLv4: 12, // 修改：增加区分度，从 8 调快到 12
+      playerDamageLv1: 1,
+      playerDamageLv2: 2,
+      playerDamageLv3: 3,
+      playerDamageLv4: 5,
+      enemyAtkRateBase: 0.3,
+      bossBulletRateNormal: 0.6,
+      bossBulletRateTrack: 0.3,
+      bossBulletRateSpread: 0.2,
+      dropSpeed: 260,
+      playerMaxHP: 8,
+      enemyHP_Low: 8,
+      enemyHP_Mid: 20,
+      enemyHP_Boss: 1000
+    }
+  },
+  entities: {
+    player: {
+      logicSize: { width: 192, height: 256 },
+      bulletSize: { width: 12, height: 48 },
+      hp: 8,
+      controlMode: "mouse_follow",
+      attackLevels: {
+        1: {
+          damage: 1,
+          fireRate: 3,
+          bulletAssetId: "fx_player_bullet_lv1",
+          bodyAssetId: "player_body_lv1"
+        },
+        2: {
+          damage: 2,
+          fireRate: 4,
+          bulletAssetId: "fx_player_bullet_lv2",
+          bodyAssetId: "player_body_lv2"
+        },
+        3: {
+          damage: 3,
+          fireRate: 6,
+          bulletAssetId: "fx_player_bullet_lv3",
+          bodyAssetId: "player_body_lv3"
+        },
+        4: {
+          damage: 5,
+          fireRate: 6, // 攻击等级4的攻速为原来的一半（12 -> 6）
+          bulletAssetId: "fx_player_bullet_lv4",
+          bodyAssetId: "player_body_lv4"
+        }
+      },
+      transformAssets: {
+        1: "player_transform_1",
+        2: "player_transform_2",
+        3: "player_transform_3"
+      },
+      explosionAssetId: "fx_explosion_small"
+    },
+    enemies: {
+      low: {
+        logicSize: { width: 200, height: 275 },
+        hp: 8,
+        moveSpeedVertical: 200,
+        movePattern: "straight_down",
+        bulletAssetId: "fx_enemy_low_bullet",
+        bodyAssetId: "enemy_low_body",
+        explosionAssetId: "fx_explosion_small"
+      },
+      mid: {
+        logicSize: { width: 336, height: 448 },
+        hp: 20,
+        moveSpeedVertical: 300,
+        moveSpeedHorizontal: 150,
+        movePattern: "down_with_random_horizontal",
+        bulletAssetId: "fx_enemy_mid_bullet",
+        bodyAssetId: "enemy_mid_body",
+        explosionAssetId: "fx_explosion_small"
+      },
+      boss: {
+        logicSize: { width: 480, height: 576 }, // 320*1.5, 384*1.5
+        hp: 1000,
+        moveSpeed: 250,
+        moveArea: "top_half",
+        bodyAssetIdPhaseA: "boss_body",
+        bodyAssetIdPhaseC: "boss_body_half",
+        transformToHalfAssetId: "boss_transform_half",
+        disintegrateAssetId: "boss_disintegrate",
+        explosionAssetId: "fx_explosion_boss",
+        bulletAssets: {
+          normal: "boss_lightning_normal",
+          track: "boss_lightning_track",
+          spread: "boss_lightning_spread"
+        }
+      },
+      boss2: {
+        logicSize: { width: 480, height: 576 },
+        hp: 1000,
+        moveSpeed: 375,
+        bodyAssetId: "boss2_body"
+      },
+      boss3: {
+        logicSize: { width: 480, height: 576 },
+        hp: 1000,
+        moveSpeed: 375,
+        bodyAssetId: "boss3_body"
+      }
+    },
+    items: {
+      attackReward: {
+        logicSize: { width: 32, height: 32 },
+        assetId: "item_reward_attack",
+        effectStages: {
+          1: { attackLevel: 2 },
+          2: { attackLevel: 3 },
+          3: { attackLevel: 4 }
+        }
+      },
+      hpReward: {
+        logicSize: { width: 32, height: 32 },
+        assetId: "item_reward_hp",
+        effects: {
+          mid: { heal: 3 },
+          boss: { heal: "full" }
+        }
+      }
+    },
+    fx: {
+      playerExplosion: {
+        logicSize: { width: 128, height: 128 },
+        assetId: "fx_explosion_small"
+      },
+      bossExplosion: {
+        logicSize: { width: 384, height: 384 },
+        assetId: "fx_explosion_boss"
+      }
+    }
+  },
+  levelConfig: {
+    dropRules: {
+      attackRewardOrder: ["low", "mid", "boss"],
+      midHpRewardOnce: true,
+      bossAttackDropHpThreshold: 166,
+      bossHpDropHpThreshold: 83
+    }
+  },
+  assets: {
+    player_body_lv1: {
+      type: "animation",
+      logicSize: { width: 192, height: 256 },
+      frameCount: 1,
+      src: "player_v1_final.gif"
+    },
+    player_body_lv2: {
+      type: "animation",
+      logicSize: { width: 192, height: 256 },
+      frameCount: 1,
+      src: "player_v2_final.gif"
+    },
+    player_body_lv3: {
+      type: "animation",
+      logicSize: { width: 192, height: 256 },
+      frameCount: 1,
+      src: "player_v3_final.gif"
+    },
+    player_body_lv4: {
+      type: "animation",
+      logicSize: { width: 192, height: 256 },
+      frameCount: 1,
+      src: "player_v3_final.gif"
+    },
+    player_transform_1: {
+      type: "animation",
+      logicSize: { width: 192, height: 256 },
+      frameCount: 16,
+      src: "grid_player_transform_1.png"
+    },
+    player_transform_2: {
+      type: "animation",
+      logicSize: { width: 192, height: 256 },
+      frameCount: 16,
+      src: "grid_player_transform_2.png"
+    },
+    player_transform_3: {
+      type: "animation",
+      logicSize: { width: 192, height: 256 },
+      frameCount: 16,
+      src: "grid_player_transform_3.png"
+    },
+    player_upgrade_flash: {
+      type: "animation",
+      logicSize: { width: 256, height: 256 },
+      frameCount: 16,
+      fps: 20,
+      src: "player_upgrade_flash.gif"
+    },
+    fx_player_bullet_lv1: {
+      type: "animation",
+      logicSize: { width: 12, height: 48 },
+      frameCount: 16,
+      src: "grid_player_bullet_lv1.png"
+    },
+    fx_player_bullet_lv2: {
+      type: "animation",
+      logicSize: { width: 12, height: 48 },
+      frameCount: 16,
+      src: "grid_player_bullet_lv2.png"
+    },
+    fx_player_bullet_lv3: {
+      type: "animation",
+      logicSize: { width: 12, height: 48 },
+      frameCount: 16,
+      src: "grid_player_bullet_lv3.png"
+    },
+    fx_player_bullet_lv4: {
+      type: "animation",
+      logicSize: { width: 12, height: 48 },
+      frameCount: 16,
+      src: "grid_player_bullet_lv4.png"
+    },
+    enemy_low_body: {
+      type: "animation",
+      logicSize: { width: 200, height: 275 },
+      frameCount: 16,
+      src: "enemy_plane1.gif"
+    },
+    enemy_mid_body: {
+      type: "animation",
+      logicSize: { width: 336, height: 448 },
+      frameCount: 16,
+      src: "enemy_plane3.gif"
+    },
+    boss_body: {
+      type: "animation",
+      logicSize: { width: 480, height: 576 },
+      frameCount: 1,
+      src: "enemy_plane_ref2_final.gif"
+    },
+    boss_body_half: {
+      type: "animation",
+      logicSize: { width: 480, height: 576 },
+      frameCount: 1,
+      src: "enemy_plane_ref2_final.gif"
+    },
+    boss2_body: {
+      type: "animation",
+      logicSize: { width: 480, height: 576 },
+      frameCount: 1,
+      src: "enemy_plane_ref4_final.gif"
+    },
+    boss3_body: {
+      type: "animation",
+      logicSize: { width: 480, height: 576 },
+      frameCount: 1,
+      src: "enemy_plane_ref5_final.gif"
+    },
+    boss_transform_half: {
+      type: "animation",
+      logicSize: { width: 480, height: 576 },
+      frameCount: 1,
+      fps: 5,
+      src: "enemy_plane_ref2_final.gif"
+    },
+    boss_disintegrate: {
+      type: "animation",
+      logicSize: { width: 480, height: 576 },
+      frameCount: 16,
+      fps: 5,
+      src: "boss_disintegrate.gif"
+    },
+    fx_enemy_low_bullet: {
+      type: "animation",
+      logicSize: { width: 8, height: 16 },
+      frameCount: 16,
+      src: "grid_enemy_low_bullet.png"
+    },
+    fx_enemy_mid_bullet: {
+      type: "animation",
+      logicSize: { width: 10, height: 19 },
+      frameCount: 16,
+      src: "grid_enemy_mid_bullet.png"
+    },
+    boss_lightning_normal: {
+      type: "code_generated",
+      logicSize: { width: 48, height: 96 } // 原 96*192 的一半
+    },
+    boss_lightning_track: {
+      type: "code_generated",
+      logicSize: { width: 64, height: 64 } // 原 128*128 的一半
+    },
+    boss_lightning_spread: {
+      type: "code_generated",
+      logicSize: { width: 112, height: 112 } // 原 224*224 的一半
+    },
+    item_reward_attack: {
+      type: "animation",
+      logicSize: { width: 32, height: 32 },
+      frameCount: 16,
+      src: "grid_item_reward_attack.png"
+    },
+    item_reward_hp: {
+      type: "animation",
+      logicSize: { width: 32, height: 32 },
+      frameCount: 16,
+      src: "grid_item_reward_hp.png"
+    },
+    fx_explosion_small: {
+      type: "animation",
+      logicSize: { width: 128, height: 128 },
+      frameCount: 9,
+      src: "grid_fx_explosion.png"
+    },
+    fx_explosion_boss: {
+      type: "animation",
+      logicSize: { width: 384, height: 384 },
+      frameCount: 9,
+      src: "grid_fx_explosion.png"
+    }
+  }
+};
+
+/* ======== 物理配置校验（强制要求） ======== */
+if (!GameManifest.meta || !GameManifest.meta.physicsConfig) {
+  throw new Error("GameManifest.meta.physicsConfig 缺失或为 null，物理配置加载失败。");
+}
+const phys = GameManifest.meta.physicsConfig;
+
+/* ======== 资源加载：校验 src 与真实文件存在性 ======== */
+const ExistingFiles = new Set([
+  "enemy_plane_ref2_final.gif",
+  "enemy_plane_ref4_final.gif",
+  "enemy_plane_ref5_final.gif",
+  "boss_test.gif",
+  "boss_body_half.gif",
+  "boss_disintegrate.gif",
+  "boss_transform.gif",
+  "grid_boss_body.png",
+  "grid_boss_bullet_normal.png",
+  "grid_boss_bullet_spread.png",
+  "grid_boss_bullet_track.png",
+  "grid_boss_disintegrate.png",
+  "grid_boss_transform_half.png",
+  "grid_enemy_low_body.png",
+  "grid_enemy_low_bullet.png",
+  "grid_enemy_mid_body.png",
+  "grid_enemy_mid_bullet.png",
+  "grid_fx_explosion.png",
+  "grid_item_reward_attack.png",
+  "grid_item_reward_hp.png",
+  "grid_player_body.png",
+  "grid_player_bullet_lv1.png",
+  "grid_player_bullet_lv2.png",
+  "grid_player_bullet_lv3.png",
+  "grid_player_bullet_lv4.png",
+  "grid_player_transform_1.png",
+  "grid_player_transform_2.png",
+  "grid_player_transform_3.png",
+  "player_upgrade_flash.gif",
+  "enemy_plane1.gif",
+  "enemy_plane2.gif",
+  "enemy_plane3.gif",
+  "player_v1_final.gif",
+  "player_v2_final.gif",
+  "player_v3_final.gif"
+]);
+
+// 校验所有 assets.src 非空且文件存在 (跳过代码生成的)
+for (const [id, a] of Object.entries(GameManifest.assets)) {
+  if (a.type === "code_generated") continue;
+  if (!a.src) {
+    throw new Error("资产 " + id + " 的 src 为空，请先提供素材 GIF 文件。");
+  }
+  if (!ExistingFiles.has(a.src)) {
+    throw new Error("资产 " + id + " 所需文件 " + a.src + " 不存在，请先生成该 GIF 素材。");
+  }
+}
+
+// 动画资源封装：支持 Sprite Sheet (网格图) 裁剪播放
+class Sprite {
+  constructor(assetId) {
+    this.assetId = assetId;
+    const asset = GameManifest.assets[assetId];
+    this.logicW = asset.logicSize.width;
+    this.logicH = asset.logicSize.height;
+    if (asset.type === "code_generated") {
+        this.loaded = true;
+        this.isGif = false;
+        this.isCodeGenerated = true;
+        return;
+    }
+    this.frameCount = asset.frameCount || 1;
+    this.image = new Image();
+    this.image.src = asset.src;
+    this.loaded = false;
+    this.isGif = asset.src.toLowerCase().endsWith('.gif');
+    this.image.onload = () => {
+      this.loaded = true;
+      if (!this.isGif) {
+        // 动态计算列数：16帧对应 4列，9帧对应 3列
+        this.cols = (this.frameCount === 16) ? 4 : 3;
+        this.rows = Math.ceil(this.frameCount / this.cols);
+        this.texW = this.image.width / this.cols;
+        this.texH = this.image.height / this.rows;
+        
+        const scale = Math.min(this.logicW / this.texW, this.logicH / this.texH);
+        this.drawW = this.texW * scale;
+        this.drawH = this.texH * scale;
+      } else {
+        // GIF 资产，等比例缩放
+        const scale = Math.min(this.logicW / this.image.width, this.logicH / this.image.height);
+        this.drawW = this.image.width * scale;
+        this.drawH = this.image.height * scale;
+      }
+    };
+    this.time = 0;
+    this.fps = asset.fps || 10; // 默认 10 帧每秒
+    this.duration = this.frameCount / this.fps; 
+  }
+  update(dt) {
+    if (this.isCodeGenerated) return;
+    this.time += dt;
+    if (this.time >= this.duration) {
+      this.time -= this.duration;
+    }
+  }
+  draw(ctx, x, y) {
+    if (!this.loaded || this.isCodeGenerated) return;
+    
+    if (this.isGif) {
+      // GIF 渲染：居中等比例缩放 (Canvas 仅保留首帧作为兜底)
+      ctx.drawImage(this.image, x - this.drawW / 2, y - this.drawH / 2, this.drawW, this.drawH);
+      return;
+    }
+
+    // 计算当前应该播放哪一帧
+    const frameIndex = Math.floor((this.time / this.duration) * this.frameCount) % this.frameCount;
+    const r = Math.floor(frameIndex / this.cols);
+    const c = frameIndex % this.cols;
+    
+    const w = this.drawW;
+    const h = this.drawH;
+    
+    // 使用 9 参数 drawImage 进行裁剪绘制
+    ctx.drawImage(
+      this.image, 
+      c * this.texW, r * this.texH, this.texW, this.texH, // 源矩形 (网格中的某一帧)
+      x - w / 2, y - h / 2, w, h                         // 目标矩形 (Canvas 位置)
+    );
+  }
+}
+
+/* ======== 动画实例缓存 ======== */
+const SpriteCache = {};
+function getSprite(assetId) {
+  if (!SpriteCache[assetId]) {
+    SpriteCache[assetId] = new Sprite(assetId);
+  }
+  return SpriteCache[assetId];
+}
+
+// 新增：GIF 同步渲染辅助函数，符合 "优先使用 <img> 展示 GIF" 规则
+function syncEntityGif(entity, assetId) {
+  const sprite = getSprite(assetId);
+  const asset = GameManifest.assets[assetId];
+  if (!sprite.isGif) {
+    if (entity.gifEl) {
+      entity.gifEl.remove();
+      entity.gifEl = null;
+      entity.currentGifAssetId = null;
+    }
+    return false;
+  }
+
+  if (!entity.gifEl) {
+    entity.gifEl = document.createElement('img');
+    entity.gifEl.className = 'gif-render-element';
+    document.getElementById('gameContainer').appendChild(entity.gifEl);
+  }
+  if (entity.currentGifAssetId !== assetId) {
+    entity.gifEl.src = asset.src;
+    entity.currentGifAssetId = assetId;
+  }
+
+  // 修改：即使 sprite 还没 onload 完成，也使用 logicSize 兜底位置，确保 GIF 能立即显示
+  const dw = sprite.loaded ? sprite.drawW : asset.logicSize.width;
+  const dh = sprite.loaded ? sprite.drawH : asset.logicSize.height;
+
+  entity.gifEl.style.width = dw + 'px';
+  entity.gifEl.style.height = dh + 'px';
+  entity.gifEl.style.left = (entity.x - dw / 2) + 'px';
+  entity.gifEl.style.top = (entity.y - dh / 2) + 'px';
+  return true;
+}
+
+/* ======== Canvas & 基础设置 ======== */
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const GAME_WIDTH = canvas.width;
+const GAME_HEIGHT = canvas.height;
+
+const GameStateEnum = {
+  LOADING: "LOADING",
+  MENU: "MENU",
+  PLAYING: "PLAYING",
+  GAME_OVER: "GAME_OVER"
+};
+let gameState = GameStateEnum.LOADING;
+
+/* ======== 鼠标输入（硬绑定玩家位置） ======== */
+let mouseX = GAME_WIDTH / 2;
+let mouseY = GAME_HEIGHT * 0.8;
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+  mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+});
+// 防止鼠标不在画布时位置失效：窗口鼠标移动时也更新
+window.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  if (
+    e.clientX >= rect.left &&
+    e.clientX <= rect.right &&
+    e.clientY >= rect.top &&
+    e.clientY <= rect.bottom
+  ) {
+    mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+    mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+  }
+});
+
+/* ======== UI 绑定 ======== */
+const overlayMenu = document.getElementById("menuScreen");
+const overlayGameOver = document.getElementById("gameOverScreen");
+const gameOverDesc = document.getElementById("gameOverDesc");
+const stateLabel = document.getElementById("stateLabel");
+
+document.getElementById("startButton").onclick = () => startGame();
+document.getElementById("restartButton").onclick = () => startGame();
+
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Space") {
+    if (gameState === GameStateEnum.MENU || gameState === GameStateEnum.GAME_OVER) {
+      startGame();
+    }
+  }
+});
+
+/* ======== 实用函数 ======== */
+function clamp(v, min, max) {
+  return v < min ? min : v > max ? max : v;
+}
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+/* ======== 全局对象与计数 ======== */
+let lastTime = performance.now();
+
+let player;
+let enemies = [];      // 低级 / 中级
+let boss = null;
+let bosses = [];       // 用于存放 Boss2, Boss3
+let currentBossWave = 1; // 1: Boss 1, 2: Boss 2 & 3
+let playerBullets = [];
+let enemyBullets = [];
+let items = [];
+let fxOneShots = [];   // 爆炸 / 变形 / 解体等
+
+// 波次状态
+let lowSpawned = 0;
+let lowKilled = 0;
+let midSpawned = 0;
+let midKilled = 0;
+let bossSpawned = false;
+let spawnTickTimer = 0;
+const spawnTickInterval = 2.0; // 每 2 秒刷一次
+
+// 掉落状态机
+let globalAttackRewardStage = 0;      // 0:未掉;1:掉攻1;2:掉攻2;3:掉攻3
+let globalHPRewardDropped_mid = false;
+let globalBossAttackDropDone = false;
+let globalBossHpDropDone = false;
+
+// Boss 状态标志
+let bossTransformPlayed = false;
+
+/* ======== 实体类 ======== */
+
+// 玩家
+class Player {
+  constructor() {
+    const logic = GameManifest.entities.player.logicSize;
+    this.width = logic.width;
+    this.height = logic.height;
+    this.x = GAME_WIDTH / 2;
+    this.y = GAME_HEIGHT * 0.8;
+    this.maxHP = phys.playerMaxHP;
+    this.hp = this.maxHP;
+    this.attackLevel = 1;
+    this.bulletCooldown = 0;
+    this.isAlive = true;
+    this.bodySpriteId = GameManifest.entities.player.attackLevels[1].bodyAssetId;
+    this.bulletSpriteId = GameManifest.entities.player.attackLevels[1].bulletAssetId;
+    this.damageMultiplier = 1.0;
+    this.fireRateMultiplier = 1.0;
+    this.gifEl = null;
+    this.currentGifAssetId = null;
+  }
+  getDamage() {
+    const cfg = GameManifest.entities.player.attackLevels[this.attackLevel];
+    return cfg.damage * this.damageMultiplier;
+  }
+  getFireRate() {
+    const cfg = GameManifest.entities.player.attackLevels[this.attackLevel];
+    return cfg.fireRate * this.fireRateMultiplier;
+  }
+  update(dt) {
+    // 鼠标硬跟随 + Clamp
+    const halfW = this.width / 2;
+    const halfH = this.height / 2;
+    this.x = clamp(mouseX, halfW, GAME_WIDTH - halfW);
+    this.y = clamp(mouseY, halfH, GAME_HEIGHT - halfH);
+
+    // 飞机机身动画
+    getSprite(this.bodySpriteId).update(dt);
+
+    // 自动射击
+    const fireRate = this.getFireRate();
+    if (fireRate > 0 && this.isAlive) {
+      this.bulletCooldown -= dt;
+      if (this.bulletCooldown <= 0) {
+        this.shoot();
+        this.bulletCooldown += 1 / fireRate;
+      }
+    }
+  }
+  shoot() {
+    const bs = GameManifest.entities.player.bulletSize;
+    // 子弹尺寸随攻击等级增大，每级宽度增加 2px，高度增加 4px
+    const w = bs.width + (this.attackLevel - 1) * 2;
+    const h = bs.height + (this.attackLevel - 1) * 4;
+    
+    // 只有攻击奖励提升的等级会增加子弹列
+    const numColumns = this.attackLevel;
+    const spacing = 24; // 列间距
+    
+    for (let i = 0; i < numColumns; i++) {
+      // 计算偏移：使所有子弹列的中轴与飞机对齐
+      const offsetX = (i - (numColumns - 1) / 2) * spacing;
+      const bullet = new PlayerBullet(
+        this.x + offsetX,
+        this.y - this.height / 2,
+        w,
+        h,
+        -phys.playerBulletSpeed,
+        this.getDamage(),
+        this.bulletSpriteId
+      );
+      playerBullets.push(bullet);
+    }
+  }
+  takeDamage(amount) {
+    if (!this.isAlive) return;
+    this.hp -= amount;
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.isAlive = false;
+      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
+      // 播放玩家爆炸
+      fxOneShots.push(new OneShotFx(
+        this.x,
+        this.y,
+        GameManifest.entities.fx.playerExplosion.assetId,
+        GameManifest.entities.fx.playerExplosion.logicSize,
+        1.0
+      ));
+      onPlayerDead();
+    }
+  }
+  heal(amount) {
+    this.hp = clamp(this.hp + amount, 0, this.maxHP);
+  }
+  healFull() {
+    this.hp = this.maxHP;
+  }
+  upgradeAttackLevel(targetLevel) {
+    const prev = this.attackLevel;
+    targetLevel = clamp(targetLevel, 1, 4);
+    if (targetLevel <= prev) return;
+    this.attackLevel = targetLevel;
+    const cfg = GameManifest.entities.player.attackLevels[targetLevel];
+    this.bodySpriteId = cfg.bodyAssetId;
+    this.bulletSpriteId = cfg.bulletAssetId;
+
+    // 特效播放：player_upgrade_flash 动画跟随玩家移动
+    const flashAsset = GameManifest.assets.player_upgrade_flash;
+    const duration = (flashAsset.frameCount / flashAsset.fps) || 0.8;
+    fxOneShots.push(new OneShotFx(
+      this.x,
+      this.y,
+      "player_upgrade_flash",
+      flashAsset.logicSize,
+      duration,
+      null,
+      this  // 传入玩家对象作为跟随目标，使动画跟随玩家移动
+    ));
+  }
+  drawLightningEffect(ctx) {
+    // 攻击等级4时，旋转速度变为现在的 2/3 (0.005 -> 0.00333)
+    const time = performance.now() * 0.00333;
+    ctx.save();
+    ctx.strokeStyle = "#4deeff";
+    ctx.lineWidth = 3;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = "#00ffff";
+    
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      let angle = (i / 5) * Math.PI * 2 + time;
+      let r = 85 + Math.sin(time * 3 + i) * 15;
+      let px = this.x + Math.cos(angle) * r;
+      let py = this.y + Math.sin(angle) * r;
+      ctx.moveTo(px, py);
+      
+      for (let j = 0; j < 4; j++) {
+        px += (Math.random() - 0.5) * 40;
+        py += (Math.random() - 0.5) * 40;
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  draw(ctx) {
+    if (!this.isAlive) return;
+
+    // 攻击等级 4 添加环绕蓝色闪电
+    if (this.attackLevel === 4) {
+      this.drawLightningEffect(ctx);
+    }
+
+    // 优先同步 GIF 渲染，若非 GIF 则走 Canvas 逻辑
+    if (!syncEntityGif(this, this.bodySpriteId)) {
+      getSprite(this.bodySpriteId).draw(ctx, this.x, this.y);
+    }
+
+    // HP 条
+    const ratio = this.hp / this.maxHP;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(this.x - 26, this.y + this.height / 2 + 10, 52, 6);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(this.x - 25, this.y + this.height / 2 + 11, 50 * ratio, 4);
+  }
+}
+
+// 玩家子弹（始终朝上，机头朝上）
+class PlayerBullet {
+  constructor(x, y, w, h, vy, damage, bulletSpriteId) {
+    this.x = x;
+    this.y = y;
+    this.width = w;
+    this.height = h;
+    this.vy = vy;
+    this.damage = damage;
+    this.alive = true;
+    this.spriteId = bulletSpriteId;
+  }
+  update(dt) {
+    this.y += this.vy * dt;
+    if (this.y + this.height / 2 < 0) this.alive = false;
+  }
+  draw(ctx) {
+    ctx.save();
+    
+    // 跳动效果：整体位置微小的随机偏移
+    const jumpX = (Math.random() - 0.5) * 6;
+    const jumpY = (Math.random() - 0.5) * 4;
+    
+    const centerX = this.x + jumpX;
+    const centerY = this.y + jumpY;
+    const halfW = this.width / 2;
+    const halfH = this.height / 2;
+
+    // 1. 设置外发光 (金黄色闪电感)
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = "#FFD700";
+    
+    // 2. 绘制主体：梭形竖长条 (两头尖)
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY - halfH); // 顶部尖端
+    
+    // 稍微带一点不规则抖动的边缘
+    const jitter = (Math.random() - 0.5) * 2;
+    ctx.lineTo(centerX + halfW + jitter, centerY); 
+    ctx.lineTo(centerX, centerY + halfH); // 底部尖端
+    ctx.lineTo(centerX - halfW - jitter, centerY);
+    
+    ctx.closePath();
+    
+    // 填充亮黄色梯度
+    const gradient = ctx.createLinearGradient(centerX, centerY - halfH, centerX, centerY + halfH);
+    gradient.addColorStop(0, "#FFFF00");
+    gradient.addColorStop(0.5, "#FFFACD"); // 柠檬绸色，内部核心更亮
+    gradient.addColorStop(1, "#FFFF00");
+    
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    
+    // 3. 描边增强闪电锐利感
+    ctx.strokeStyle = "#FFD700";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // 4. 内部高亮核心 (白色极细条，模拟闪电核心)
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY - halfH * 0.8);
+    ctx.lineTo(centerX, centerY + halfH * 0.8);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    
+    ctx.restore();
+  }
+}
+
+// 敌机（低级 / 中级）
+class Enemy {
+  constructor(type, x, y) {
+    this.type = type; // "low" / "mid"
+    const entCfg = GameManifest.entities.enemies[type];
+    this.width = entCfg.logicSize.width;
+    this.height = entCfg.logicSize.height;
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = 0;
+    this.hp = entCfg.hp;
+    this.alive = true;
+    this.shootCooldown = 0;
+    this.bodySpriteId = entCfg.bodyAssetId;
+    this.bulletSpriteId = entCfg.bulletAssetId;
+    this.gifEl = null;
+    this.currentGifAssetId = null;
+
+    if (type === "low") {
+      this.vy = phys.enemySpeedLow; // 独立于背景速度
+    } else if (type === "mid") {
+      this.vy = phys.enemySpeedMidVertical; // 独立于背景速度
+      this.vx = (Math.random() < 0.5 ? -1 : 1) * phys.enemySpeedMidHorizontal;
+    }
+  }
+  update(dt) {
+    // 运动
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+
+    // 边界碰撞修正与速度清空/反弹（防穿出）
+    const halfW = this.width / 2;
+    const halfH = this.height / 2;
+    if (this.type === "mid") {
+      if (this.x - halfW < 0) {
+        this.x = halfW;
+        this.vx = Math.abs(this.vx); // 反弹
+      } else if (this.x + halfW > GAME_WIDTH) {
+        this.x = GAME_WIDTH - halfW;
+        this.vx = -Math.abs(this.vx);
+      }
+    } else {
+      if (this.x - halfW < 0) {
+        this.x = halfW;
+        this.vx = 0;
+      } else if (this.x + halfW > GAME_WIDTH) {
+        this.x = GAME_WIDTH - halfW;
+        this.vx = 0;
+      }
+    }
+
+    if (this.y - halfH > GAME_HEIGHT) {
+      this.takeDamage(this.hp);
+    }
+
+    // 攻击
+    this.shootCooldown -= dt;
+    if (this.shootCooldown <= 0) {
+      this.shoot();
+      this.shootCooldown += 1 / phys.enemyAtkRateBase;
+    }
+
+    getSprite(this.bodySpriteId).update(dt);
+  }
+  shoot() {
+    const speed =
+      (this.type === "low"
+        ? phys.enemyBulletSpeedLow
+        : phys.enemyBulletSpeedMid); // 独立于背景速度
+    const bulletLogic = this.type === "low"
+      ? GameManifest.assets.fx_enemy_low_bullet.logicSize
+      : GameManifest.assets.fx_enemy_mid_bullet.logicSize;
+    const bullet = new EnemyBullet(
+      this.type === "low" ? "low" : "mid",
+      this.x,
+      this.y + this.height / 2,
+      0,
+      speed,
+      1,
+      this.bulletSpriteId,
+      bulletLogic
+    );
+    enemyBullets.push(bullet);
+  }
+  takeDamage(amount) {
+    this.hp -= amount;
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.alive = false;
+      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
+      // 小爆炸
+      fxOneShots.push(new OneShotFx(
+        this.x,
+        this.y,
+        GameManifest.entities.fx.playerExplosion.assetId,
+        GameManifest.entities.fx.playerExplosion.logicSize,
+        1.0
+      ));
+      onEnemyDead(this);
+    }
+  }
+  draw(ctx) {
+    // 优先同步 GIF 渲染，若非 GIF 则走 Canvas 逻辑
+    if (!syncEntityGif(this, this.bodySpriteId)) {
+      const sprite = getSprite(this.bodySpriteId);
+      sprite.draw(ctx, this.x, this.y);
+    }
+
+    // 敌机血条
+    const maxHp = this.type === 'low' ? phys.enemyHP_Low : phys.enemyHP_Mid;
+    const ratio = clamp(this.hp / maxHp, 0, 1);
+    const barWidth = this.type === 'mid' ? 60 : 40;
+    const barHeight = 4;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(this.x - barWidth / 2, this.y - this.height / 2 - 10, barWidth, barHeight);
+    ctx.fillStyle = '#ffb347';
+    ctx.fillRect(this.x - barWidth / 2 + 1, this.y - this.height / 2 - 9, (barWidth - 2) * ratio, barHeight - 2);
+  }
+}
+
+// Boss
+class Boss {
+  constructor(bossType = "boss1") {
+    this.bossType = bossType; // "boss1", "boss2", "boss3"
+    const cfg = GameManifest.entities.enemies[bossType === "boss1" ? "boss" : bossType];
+    this.width = cfg.logicSize.width;
+    this.height = cfg.logicSize.height;
+    this.x = GAME_WIDTH / 2;
+    this.y = -this.height / 2;
+    // boss2、boss3的血量与boss敌机保持一致（都是1000）
+    this.hpMax = phys.enemyHP_Boss;
+    this.hp = phys.enemyHP_Boss;
+    this.alive = true;
+
+    this.moveSpeed = bossType === "boss1" ? phys.enemySpeedBoss : phys.enemySpeedBoss23;
+    this.entered = false;
+    this.targetX = GAME_WIDTH / 2;
+    this.targetY = 200;
+    this.vx = 0;
+    this.vy = 200; // 入场下落速度
+
+    this.phase = "A"; // A/B/C/D
+    this.bodySpriteId = (bossType === "boss1") ? GameManifest.entities.enemies.boss.bodyAssetIdPhaseA : cfg.bodyAssetId;
+
+    // 攻击计时器
+    this.normalCooldown = 0;
+    this.trackCooldown = 0;
+    this.spreadCooldown = 0;
+    this.fanCooldown = 0;
+    this.burstCooldown = 0;
+
+    this.attackDropDone = false;
+    this.hpDropDone = false;
+    this.transformPlaying = false;
+    this.transformTimer = 0;
+    this.transformDuration = 3.2;
+    this.gifEl = null;
+    this.currentGifAssetId = null;
+    
+    if (bossType !== "boss1") {
+      this.entered = true;
+      this.y = 200;
+      this.x = bossType === "boss2" ? 300 : 780;
+      this.pickNewTarget();
+    }
+  }
+  pickNewTarget() {
+    const halfW = this.width / 2;
+    const halfH = this.height / 2;
+    const minX = halfW;
+    const maxX = GAME_WIDTH - halfW;
+    const minY = halfH;
+    const maxY = 960 - halfH; // 上半屏
+    this.targetX = minX + Math.random() * (maxX - minX);
+    this.targetY = minY + Math.random() * (maxY - minY);
+  }
+  update(dt) {
+    const cfg = GameManifest.entities.enemies[this.bossType === "boss1" ? "boss" : this.bossType];
+
+    // 入场
+    if (!this.entered) {
+      this.y += this.vy * dt;
+      const targetY = this.height / 2 + 80;
+      if (this.y >= targetY) {
+        this.y = targetY;
+        this.entered = true;
+        this.pickNewTarget();
+      }
+    } else {
+      // 躲避玩家子弹逻辑 (Boss 2 & 3)
+      if (this.bossType !== "boss1") {
+        for (const b of playerBullets) {
+          if (Math.abs(b.x - this.x) < 200 && b.y > this.y && b.y < this.y + 600) {
+            // 玩家子弹在下方逼近，向反方向移动
+            this.targetX = b.x > this.x ? clamp(this.x - 300, this.width/2, GAME_WIDTH - this.width/2) : clamp(this.x + 300, this.width/2, GAME_WIDTH - this.width/2);
+          }
+        }
+      }
+
+      // 自由移动（上半屏游走）
+      const dx = this.targetX - this.x;
+      const dy = this.targetY - this.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const vx = (dx / dist) * this.moveSpeed;
+      const vy = (dy / dist) * this.moveSpeed;
+      this.x += vx * dt;
+      this.y += vy * dt;
+
+      // 边界修正
+      const halfW = this.width / 2;
+      const halfH = this.height / 2;
+      const minX = halfW;
+      const maxX = GAME_WIDTH - halfW;
+      const minY = halfH;
+      const maxY = 960 - halfH;
+      
+      let clamped = false;
+      if (this.x < minX) { this.x = minX; clamped = true; } 
+      if (this.x > maxX) { this.x = maxX; clamped = true; }
+      if (this.y < minY) { this.y = minY; clamped = true; } 
+      if (this.y > maxY) { this.y = maxY; clamped = true; }
+
+      if (clamped || dist < 10 || Math.random() < 0.01) {
+        this.pickNewTarget();
+      }
+    }
+
+    if (this.bossType === "boss1") {
+      // 阶段判定 & 变形解锁
+      if (this.hp > 664) {
+        this.phase = "A";
+        this.bodySpriteId = GameManifest.entities.enemies.boss.bodyAssetIdPhaseA;
+      } else if (this.hp > 500) {
+        this.phase = "B";
+        this.bodySpriteId = GameManifest.entities.enemies.boss.bodyAssetIdPhaseA;
+      } else if (this.hp > 332) {
+        this.phase = "C";
+        if (!bossTransformPlayed) {
+          this.transformPlaying = true;
+          this.transformTimer = 0;
+          bossTransformPlayed = true;
+        }
+      } else {
+        this.phase = "D";
+      }
+
+      // 变形动画更新
+      if (this.transformPlaying) {
+        this.transformTimer += dt;
+        getSprite(GameManifest.entities.enemies.boss.transformToHalfAssetId).update(dt);
+        if (this.transformTimer >= this.transformDuration) {
+          this.transformPlaying = false;
+          this.bodySpriteId = GameManifest.entities.enemies.boss.bodyAssetIdPhaseC;
+        }
+      } else {
+        getSprite(this.bodySpriteId).update(dt);
+      }
+
+      // 攻击掉落阈值
+      if (!this.attackDropDone && this.hp <= 664) {
+        this.attackDropDone = true;
+        globalBossAttackDropDone = true;
+        globalAttackRewardStage = 3;
+        spawnAttackReward(this.x, this.y + this.height / 2, "boss");
+      }
+      if (!this.hpDropDone && this.hp <= 332) {
+        this.hpDropDone = true;
+        globalBossHpDropDone = true;
+        spawnHpReward(this.x, this.y + this.height / 2, "boss");
+      }
+
+      // 攻击逻辑
+      this.normalCooldown -= dt;
+      if (this.normalCooldown <= 0) {
+        this.shootNormal();
+        this.normalCooldown += 1 / phys.bossBulletRateNormal;
+      }
+      this.trackCooldown -= dt;
+      if (this.trackCooldown <= 0) {
+        this.shootTrack();
+        this.trackCooldown += 1 / phys.bossBulletRateTrack;
+      }
+      if (this.phase === "C" || this.phase === "D") {
+        this.spreadCooldown -= dt;
+        if (this.spreadCooldown <= 0) {
+          this.shootSpread();
+          this.spreadCooldown += 1 / phys.bossBulletRateSpread;
+        }
+      }
+    } else if (this.bossType === "boss2") {
+      // Boss 2 扇形攻击 (6列)
+      getSprite(this.bodySpriteId).update(dt);
+      this.fanCooldown -= dt;
+      if (this.fanCooldown <= 0) {
+        this.shootFan();
+        this.fanCooldown += 1.5; // 每 1.5 秒发射一次扇形
+      }
+    } else if (this.bossType === "boss3") {
+      // Boss 3 连发追踪
+      getSprite(this.bodySpriteId).update(dt);
+      this.burstCooldown -= dt;
+      if (this.burstCooldown <= 0) {
+        this.shootBurstTrack();
+        this.burstCooldown += 2.0; // 每 2 秒发射一波
+      }
+    }
+  }
+  shootNormal() {
+    const cfg = GameManifest.assets.boss_lightning_normal;
+    const bullet = new EnemyBullet(
+      "boss_normal",
+      this.x,
+      this.y + this.height / 2,
+      0,
+      phys.bossBulletSpeedNormal,
+      2,
+      GameManifest.entities.enemies.boss.bulletAssets.normal,
+      cfg.logicSize
+    );
+    enemyBullets.push(bullet);
+  }
+  shootTrack() {
+    const cfg = GameManifest.assets.boss_lightning_track;
+    const trackSpeed = phys.bossBulletSpeedTrack;
+    let vx = 0;
+    let vy = trackSpeed;
+    if (player && player.isAlive) {
+      const dx = player.x - this.x;
+      const dy = player.y - this.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      vx = (dx / dist) * trackSpeed;
+      vy = (dy / dist) * trackSpeed;
+    }
+    const bullet = new EnemyBullet(
+      "boss_track",
+      this.x,
+      this.y + this.height / 2,
+      vx,
+      vy,
+      3,
+      GameManifest.entities.enemies.boss.bulletAssets.track,
+      cfg.logicSize
+    );
+    enemyBullets.push(bullet);
+  }
+  shootSpread() {
+    const cfg = GameManifest.assets.boss_lightning_spread;
+    const spreadSpeed = phys.bossBulletSpeedSpread;
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count;
+      const vx = Math.cos(angle) * spreadSpeed;
+      const vy = Math.sin(angle) * spreadSpeed;
+      const bullet = new EnemyBullet(
+        "boss_spread",
+        this.x,
+        this.y,
+        vx,
+        vy,
+        2,
+        GameManifest.entities.enemies.boss.bulletAssets.spread,
+        cfg.logicSize
+      );
+      enemyBullets.push(bullet);
+    }
+  }
+  shootFan() {
+    const count = 6;
+    const spreadAngle = Math.PI / 3; // 60度扇形
+    for (let i = 0; i < count; i++) {
+      const angle = Math.PI/2 - spreadAngle/2 + (spreadAngle * i / (count - 1));
+      const vx = Math.cos(angle) * 500;
+      const vy = Math.sin(angle) * 500;
+      const bullet = new EnemyBullet(
+        "boss2_black",
+        this.x,
+        this.y + this.height / 2,
+        vx,
+        vy,
+        2,
+        "",
+        { width: 50, height: 80 }
+      );
+      enemyBullets.push(bullet);
+    }
+  }
+  shootBurstTrack() {
+    let delay = 0;
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => {
+        if (!this.alive || gameState !== GameStateEnum.PLAYING) return;
+        const trackSpeed = 450;
+        let vx = 0, vy = trackSpeed;
+        if (player && player.isAlive) {
+          const dx = player.x - this.x;
+          const dy = player.y - this.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          vx = (dx / dist) * trackSpeed;
+          vy = (dy / dist) * trackSpeed;
+        }
+        const bullet = new EnemyBullet(
+          "boss3_gold",
+          this.x,
+          this.y + this.height / 2,
+          vx,
+          vy,
+          3,
+          "",
+          { width: 60, height: 60 }
+        );
+        enemyBullets.push(bullet);
+      }, delay);
+      delay += 200;
+    }
+  }
+  takeDamage(amount) {
+    if (!this.alive) return;
+    this.hp -= amount;
+    if (this.hp < 0) this.hp = 0;
+
+    if (this.hp <= 0) {
+      this.alive = false;
+      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
+      // 所有 Boss（包括 boss1、boss2、boss3）血条清空时，都会触发爆炸动画
+      fxOneShots.push(new OneShotFx(
+        this.x,
+        this.y,
+        GameManifest.entities.fx.bossExplosion.assetId,
+        GameManifest.entities.fx.bossExplosion.logicSize,
+        1.0,
+        () => onBossDead(this)
+      ));
+    }
+  }
+  draw(ctx) {
+    if (!this.alive) return;
+    let currentAsset = this.bodySpriteId;
+    if (this.bossType === "boss1" && this.transformPlaying) {
+      currentAsset = GameManifest.entities.enemies.boss.transformToHalfAssetId;
+    }
+    
+    if (!syncEntityGif(this, currentAsset)) {
+      const sprite = getSprite(currentAsset);
+      sprite.draw(ctx, this.x, this.y);
+    }
+
+    const barWidth2 = 160;
+    const barHeight2 = 6;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(this.x - barWidth2 / 2, this.y - this.height / 2 - 15, barWidth2, barHeight2);
+    ctx.fillStyle = this.bossType === "boss1" ? '#ff4040' : (this.bossType === "boss2" ? '#444' : '#ffd700');
+    ctx.fillRect(this.x - barWidth2 / 2 + 1, this.y - this.height / 2 - 14, (barWidth2 - 2) * clamp(this.hp / this.hpMax, 0, 1), barHeight2 - 2);
+    ctx.restore();
+  }
+}
+
+// 敌机子弹
+class EnemyBullet {
+  constructor(kind, x, y, vx, vy, damage, spriteId, logicSize) {
+    this.kind = kind;     // "low" / "mid" / "boss_normal" ...
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.damage = damage;
+    this.alive = true;
+    this.spriteId = spriteId;
+    this.width = logicSize.width;
+    this.height = logicSize.height;
+    this.angleRad = Math.atan2(vy, vx);
+    // boss3 子弹追踪时间：0.5秒后沿切线方向直线射出
+    this.trackingTimer = (kind === "boss3_gold") ? 0.5 : 0.5;
+    this.rot = 0; 
+  }
+  update(dt) {
+    if ((this.kind === "boss_track" || this.kind === "mid" || this.kind === "boss3_gold") && this.trackingTimer > 0) {
+      this.trackingTimer -= dt;
+      if (player && player.isAlive) {
+        const dx = player.x - this.x;
+        const dy = player.y - this.y;
+        const targetAngle = Math.atan2(dy, dx);
+        const maxTurn = (this.kind === "boss3_gold" ? Math.PI : Math.PI / 2) * dt; 
+        let diff = normalizeAngle(targetAngle - this.angleRad);
+        diff = clamp(diff, -maxTurn, maxTurn);
+        this.angleRad = normalizeAngle(this.angleRad + diff);
+        const speed = Math.hypot(this.vx, this.vy);
+        this.vx = Math.cos(this.angleRad) * speed;
+        this.vy = Math.sin(this.angleRad) * speed;
+      }
+    }
+
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.rot += Math.PI * 4 * dt;
+
+    if (this.x + this.width / 2 < -100 ||
+      this.x - this.width / 2 > GAME_WIDTH + 100 ||
+      this.y + this.height / 2 < -100 ||
+      this.y - this.height / 2 > GAME_HEIGHT + 100
+    ) {
+      this.alive = false;
+    }
+
+    if (this.spriteId && this.kind.startsWith("boss")) {
+      getSprite(this.spriteId).update(dt);
+    }
+  }
+  draw(ctx) {
+    if (this.kind === "boss2_black") {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.angleRad + Math.PI/2);
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = "#000";
+      // 细长的椭圆形
+      ctx.fillStyle = "#222";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.width/4, this.height/2, 0, 0, Math.PI*2);
+      ctx.fill();
+      // 闪烁的闪电粒子特效
+      ctx.strokeStyle = "#444";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let py = -this.height/2;
+      ctx.moveTo(0, py);
+      while(py < this.height/2) {
+        py += 5 + Math.random()*10;
+        ctx.lineTo((Math.random()-0.5)*this.width/2, py);
+      }
+      ctx.stroke();
+      ctx.restore();
+    } else if (this.kind === "boss3_gold") {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.angleRad + Math.PI/2);
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = "#ffd700";
+      // 细长的椭圆形
+      ctx.fillStyle = "#ffcc00";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.width/4, this.height/2, 0, 0, Math.PI*2);
+      ctx.fill();
+      // 闪烁的闪电粒子特效
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let py = -this.height/2;
+      ctx.moveTo(0, py);
+      while(py < this.height/2) {
+        py += 5 + Math.random()*10;
+        ctx.lineTo((Math.random()-0.5)*this.width/2, py);
+      }
+      ctx.stroke();
+      ctx.restore();
+    } else if (this.kind === "mid") {
+      ctx.save();
+      const radius = Math.max(this.width, this.height) * 1.5;
+      ctx.shadowBlur = 30;
+      ctx.shadowColor = "#0000ff";
+      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, radius);
+      grad.addColorStop(0, "#ffffff");
+      grad.addColorStop(0.3, "#0000ff");
+      grad.addColorStop(0.6, "#000088");
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (this.kind === "low") {
+      // 浅蓝色的长条闪电粒子特效
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.angleRad + Math.PI/2);
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = "#add8e6";
+      ctx.beginPath();
+      ctx.moveTo(0, -this.height);
+      ctx.lineTo((Math.random()-0.5)*8, 0);
+      ctx.lineTo(0, this.height);
+      ctx.strokeStyle = "#e0ffff";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      if (Math.random() > 0.5) {
+         ctx.beginPath();
+         ctx.moveTo((Math.random()-0.5)*15, -this.height);
+         ctx.lineTo((Math.random()-0.5)*15, this.height);
+         ctx.strokeStyle = "rgba(255,255,255,0.8)";
+         ctx.lineWidth = 1;
+         ctx.stroke();
+      }
+      ctx.restore();
+    } else if (this.kind === "boss_normal") {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = "#ff0000";
+      ctx.beginPath();
+      ctx.moveTo(0, -this.height/2);
+      ctx.lineTo((Math.random()-0.5)*30, -this.height/6);
+      ctx.lineTo((Math.random()-0.5)*30, this.height/6);
+      ctx.lineTo(0, this.height/2);
+      ctx.strokeStyle = "#ff3333";
+      ctx.lineWidth = 8;
+      ctx.stroke();
+      ctx.restore();
+    } else if (this.kind === "boss_track") {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rot);
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = "#ff0000";
+        const r = this.width / 2;
+        ctx.beginPath();
+        for(let i=0; i<3; i++) {
+            const ang = (i * Math.PI * 2) / 3 - Math.PI/2;
+            const tx = Math.cos(ang) * r;
+            const ty = Math.sin(ang) * r;
+            if(i===0) ctx.moveTo(tx, ty);
+            else ctx.lineTo(tx, ty);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = "#ff0000";
+        ctx.lineWidth = 6;
+        ctx.stroke();
+        ctx.restore();
+    } else if (this.kind === "boss_spread") {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        const radius = this.width / 2;
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+        grad.addColorStop(0, "#ffffff");
+        grad.addColorStop(0.4, "#ff0000");
+        grad.addColorStop(1, "rgba(255, 0, 0, 0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+    } else {
+      const sprite = getSprite(this.spriteId);
+      sprite.draw(ctx, this.x, this.y);
+    }
+  }
+}
+
+// 掉落物
+class Item {
+  constructor(kind, x, y, source) {
+    this.kind = kind;
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = phys.dropSpeed;
+    this.alive = true;
+    this.source = source;
+    const logicSize = GameManifest.entities.items.attackReward.logicSize;
+    this.width = logicSize.width;
+    this.height = logicSize.height;
+    this.spriteId = kind === "attack" ? GameManifest.entities.items.attackReward.assetId : GameManifest.entities.items.hpReward.assetId;
+  }
+  update(dt) {
+    this.y += this.vy * dt;
+    if (this.y - this.height / 2 > GAME_HEIGHT) this.alive = false;
+    getSprite(this.spriteId).update(dt);
+  }
+  draw(ctx) {
+    getSprite(this.spriteId).draw(ctx, this.x, this.y);
+  }
+}
+
+// 一次性特效
+class OneShotFx {
+  constructor(x, y, spriteId, logicSize, duration, onEnd, followTarget = null) {
+    this.x = x;
+    this.y = y;
+    this.spriteId = spriteId;
+    this.width = logicSize.width;
+    this.height = logicSize.height;
+    this.duration = duration;
+    this.timer = 0;
+    this.alive = true;
+    this.onEnd = onEnd || null;
+    this.gifEl = null;
+    this.currentGifAssetId = null;
+    this.followTarget = followTarget; // 可选的跟随目标（如玩家对象）
+  }
+  update(dt) {
+    // 如果有跟随目标，更新位置以跟随目标
+    if (this.followTarget && this.followTarget.isAlive) {
+      this.x = this.followTarget.x;
+      this.y = this.followTarget.y;
+    }
+    
+    this.timer += dt;
+    getSprite(this.spriteId).update(dt);
+    if (this.timer >= this.duration) {
+      this.alive = false;
+      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
+      if (this.onEnd) this.onEnd();
+    }
+  }
+  draw(ctx) {
+    if (!syncEntityGif(this, this.spriteId)) {
+      getSprite(this.spriteId).draw(ctx, this.x, this.y);
+    }
+  }
+}
+
+/* ======== 掉落辅助 ======== */
+function spawnAttackReward(x, y, source = "global") {
+  items.push(new Item("attack", x, y, source));
+}
+function spawnHpReward(x, y, source) {
+  items.push(new Item("hp", x, y, source));
+}
+
+/* ======== 敌机生成 & 波次逻辑 ======== */
+function spawnLowEnemy() {
+  const cfg = GameManifest.entities.enemies.low.logicSize;
+  const x = cfg.width / 2 + Math.random() * (GAME_WIDTH - cfg.width);
+  const y = -cfg.height;
+  enemies.push(new Enemy("low", x, y));
+}
+function spawnMidEnemy() {
+  const cfg = GameManifest.entities.enemies.mid.logicSize;
+  const x = cfg.width / 2 + Math.random() * (GAME_WIDTH - cfg.width);
+  const y = -cfg.height;
+  enemies.push(new Enemy("mid", x, y));
+}
+
+function updateSpawns(dt) {
+  if (bossSpawned) return;
+  spawnTickTimer -= dt;
+  if (spawnTickTimer <= 0) {
+    spawnTickTimer += spawnTickInterval;
+    doSpawnTick();
+  }
+
+  if (!bossSpawned && lowKilled === 10 && midKilled === 5 && enemies.length === 0) {
+    boss = new Boss("boss1");
+    bossSpawned = true;
+  }
+}
+
+function doSpawnTick() {
+  if (lowKilled < 5) {
+    if (lowSpawned < 10) { spawnLowEnemy(); lowSpawned++; }
+    return;
+  }
+  const needLow = lowSpawned < 10;
+  const needMid = midSpawned < 5;
+  if (!needLow && !needMid) return;
+  const totalSpawned = lowSpawned + midSpawned;
+  if (totalSpawned % 2 === 0) {
+    if (needLow) { spawnLowEnemy(); lowSpawned++; } else if (needMid) { spawnMidEnemy(); midSpawned++; }
+  } else {
+    if (needMid) { spawnMidEnemy(); midSpawned++; } else if (needLow) { spawnLowEnemy(); lowSpawned++; }
+  }
+}
+
+/* ======== 死亡回调 ======== */
+function onEnemyDead(enemy) {
+  if (enemy.type === "low") {
+    lowKilled++;
+    if (globalAttackRewardStage === 0) { globalAttackRewardStage = 1; spawnAttackReward(enemy.x, enemy.y); }
+  } else if (enemy.type === "mid") {
+    midKilled++;
+    if (globalAttackRewardStage === 1) { globalAttackRewardStage = 2; spawnAttackReward(enemy.x, enemy.y); }
+    if (!globalHPRewardDropped_mid) { globalHPRewardDropped_mid = true; spawnHpReward(enemy.x, enemy.y, "mid"); }
+  }
+}
+
+function onPlayerDead() {
+  gameState = GameStateEnum.GAME_OVER;
+  overlayGameOver.style.display = "block";
+  overlayMenu.style.display = "none";
+  gameOverDesc.textContent = "玩家被击毁。";
+}
+
+function onBossDead(deadBoss) {
+  if (currentBossWave === 1) {
+    // Boss 1 死亡，触发 Boss 2 和 Boss 3 同时出现
+    currentBossWave = 2;
+    boss = null;
+    bosses = [new Boss("boss2"), new Boss("boss3")];
+    console.log("Boss 1 击败，双 Boss 出现！");
+  } else {
+    // Boss 2/3 死亡逻辑
+    // boss2、boss3血条都清空时游戏胜利
+    bosses = bosses.filter(b => b !== deadBoss);
+    if (bosses.length === 0) {
+      // 所有 Boss（boss2 和 boss3）都被击败，游戏胜利
+      gameState = GameStateEnum.GAME_OVER;
+      overlayGameOver.style.display = "block";
+      overlayMenu.style.display = "none";
+      gameOverDesc.textContent = "恭喜！你击败了所有强敌，获得最终胜利！";
+    }
+  }
+}
+
+/* ======== 碰撞处理 ======== */
+function handleCollisions() {
+  if (player && player.isAlive) {
+    const px = player.x - player.width / 2;
+    const py = player.y - player.height / 2;
+    const pw = player.width;
+    const ph = player.height;
+
+    for (const eb of enemyBullets) {
+      if (!eb.alive) continue;
+      if (rectsOverlap(px, py, pw, ph, eb.x - eb.width/2, eb.y - eb.height/2, eb.width, eb.height)) {
+        eb.alive = false; player.takeDamage(eb.damage);
+      }
+    }
+
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if (rectsOverlap(px, py, pw, ph, e.x - e.width/2, e.y - e.height/2, e.width, e.height)) {
+        e.alive = false; onEnemyDead(e); player.takeDamage(1);
+      }
+    }
+
+    if (boss && boss.alive) {
+      if (rectsOverlap(px, py, pw, ph, boss.x - boss.width/2, boss.y - boss.height/2, boss.width, boss.height)) player.takeDamage(3);
+    }
+    for (const b of bosses) {
+      if (b.alive && rectsOverlap(px, py, pw, ph, b.x - b.width/2, b.y - b.height/2, b.width, b.height)) player.takeDamage(3);
+    }
+
+    for (const it of items) {
+      if (!it.alive) continue;
+      if (rectsOverlap(px, py, pw, ph, it.x - it.width/2, it.y - it.height/2, it.width, it.height)) {
+        it.alive = false;
+        if (it.kind === "attack") {
+          player.upgradeAttackLevel(player.attackLevel + 1);
+          if (it.source === "boss") { player.damageMultiplier *= 1.5; player.fireRateMultiplier *= 1.5; }
+        } else {
+          if (it.source === "mid") player.heal(3); else player.healFull();
+        }
+      }
+    }
+  }
+
+  for (const b of playerBullets) {
+    if (!b.alive) continue;
+    let hit = false;
+    for (const e of enemies) {
+      if (e.alive && rectsOverlap(b.x - b.width/2, b.y - b.height/2, b.width, b.height, e.x - e.width/2, e.y - e.height/2, e.width, e.height)) {
+        e.takeDamage(b.damage); b.alive = false; hit = true; break;
+      }
+    }
+    if (hit) continue;
+    if (boss && boss.alive && rectsOverlap(b.x - b.width/2, b.y - b.height/2, b.width, b.height, boss.x - boss.width/2, boss.y - boss.height/2, boss.width, boss.height)) {
+      boss.takeDamage(b.damage); b.alive = false;
+    }
+    for (const bb of bosses) {
+      if (bb.alive && rectsOverlap(b.x - b.width/2, b.y - b.height/2, b.width, b.height, bb.x - bb.width/2, bb.y - bb.height/2, bb.width, bb.height)) {
+        bb.takeDamage(b.damage); b.alive = false; break;
+      }
+    }
+  }
+}
+
+/* ======== 游戏状态控制 ======== */
+function startGame() {
+  gameState = GameStateEnum.PLAYING;
+  overlayMenu.style.display = "none";
+  overlayGameOver.style.display = "none";
+  document.querySelectorAll('.gif-render-element').forEach(el => el.remove());
+  const bgVideo = document.getElementById("bgVideo");
+  if (bgVideo && bgVideo.paused) bgVideo.play().catch(err => console.warn(err));
+
+  player = new Player();
+  enemies = [];
+  playerBullets = [];
+  enemyBullets = [];
+  items = [];
+  fxOneShots = [];
+  boss = null;
+  bosses = [];
+  currentBossWave = 1;
+
+  lowSpawned = 0; lowKilled = 0; midSpawned = 0; midKilled = 0;
+  bossSpawned = false; spawnTickTimer = 0;
+  globalAttackRewardStage = 0; globalHPRewardDropped_mid = false;
+  globalBossAttackDropDone = false; globalBossHpDropDone = false; bossTransformPlayed = false;
+}
+
+/* ======== 更新与渲染 ======== */
+function update(dt) {
+  if (gameState !== GameStateEnum.PLAYING) return;
+  updateSpawns(dt);
+  if (player) player.update(dt);
+  for (const e of enemies) if (e.alive) e.update(dt);
+  enemies = enemies.filter(e => { if(!e.alive && e.gifEl) e.gifEl.remove(); return e.alive; });
+  if (boss && boss.alive) boss.update(dt);
+  for (const b of bosses) if (b.alive) b.update(dt);
+  for (const b of playerBullets) if (b.alive) b.update(dt);
+  playerBullets = playerBullets.filter(b => b.alive);
+  for (const eb of enemyBullets) if (eb.alive) eb.update(dt);
+  enemyBullets = enemyBullets.filter(eb => eb.alive);
+  for (const it of items) if (it.alive) it.update(dt);
+  items = items.filter(it => it.alive);
+  for (const fx of fxOneShots) if (fx.alive) fx.update(dt);
+  fxOneShots = fxOneShots.filter(fx => { if(!fx.alive && fx.gifEl) fx.gifEl.remove(); return fx.alive; });
+  handleCollisions();
+}
+
+function drawUIOverlay() {
+  ctx.save(); ctx.fillStyle = "#fff"; ctx.font = "24px Arial";
+  ctx.fillText(player && player.isAlive ? `HP: ${player.hp}/${player.maxHP}` : "HP: 0", 20, GAME_HEIGHT - 80);
+  if (player) ctx.fillText(`攻击等级: ${player.attackLevel}`, 20, GAME_HEIGHT - 50);
+  ctx.fillText(`进度: ${lowKilled}/10 低级, ${midKilled}/5 中级`, 20, GAME_HEIGHT - 110);
+  ctx.restore();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+  for (const it of items) it.draw(ctx);
+  for (const e of enemies) e.draw(ctx);
+  if (boss && boss.alive) boss.draw(ctx);
+  for (const b of bosses) b.draw(ctx);
+  for (const b of playerBullets) b.draw(ctx);
+  for (const eb of enemyBullets) eb.draw(ctx);
+  if (player) player.draw(ctx);
+  for (const fx of fxOneShots) fx.draw(ctx);
+  drawUIOverlay();
+  stateLabel.textContent = gameState;
+}
+
+function gameLoop(timestamp) {
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+  lastTime = timestamp;
+  if (gameState === GameStateEnum.LOADING) { gameState = GameStateEnum.MENU; overlayMenu.style.display = "block"; }
+  if (gameState === GameStateEnum.PLAYING) update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
