@@ -1,1984 +1,1938 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>飞机大战 - 动漫风弹幕版</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Blood Abyss Survivor</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      background: #000;
-    }
-    body {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-    #gameContainer {
-      position: relative;
-      width: 1080px;
-      height: 1920px;
-      background: transparent;
-      box-shadow: 0 0 20px rgba(0, 0, 0, 0.7);
-      overflow: hidden;
-    }
-    #bgVideo {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      z-index: 0;
-      pointer-events: none;
-      display: block;
-    }
-    canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      display: block;
-      width: 100%;
-      height: 100%;
-      background: transparent;
-      z-index: 2;
-    }
-    #overlay {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      z-index: 3;
-    }
-    #overlay .center {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      text-align: center;
-    }
-    #overlay button {
-      pointer-events: auto;
-      padding: 10px 24px;
-      font-size: 20px;
-      margin-top: 16px;
-      cursor: pointer;
-    }
-    #overlay h1 {
-      margin-bottom: 8px;
-    }
-    #overlay p {
-      margin: 4px 0;
-    }
-    #stateLabel {
-      position: absolute;
-      left: 20px;
-      top: 20px;
-      font-size: 18px;
-      text-shadow: 0 0 4px #000;
-    }
-    .gif-render-element {
-      position: absolute;
-      z-index: 1;
-      pointer-events: none;
-      display: block;
-    }
+    html, body { margin:0; padding:0; background:#0a0a0d; overflow:hidden; font-family: monospace; display:flex; justify-content:center; align-items:center; min-height:100vh; width:100vw; }
+    #gameContainer { position:relative; display:block; }
+    #gameContainer canvas { position:absolute; left:0; top:0; }
+    #backCanvas { z-index:0; }
+    #enemyOverlay { position:absolute; left:0; top:0; z-index:1; pointer-events:none; overflow:hidden; }
+    #frontCanvas { z-index:2; background:transparent; }
+    canvas { display:block; background:#111; image-rendering: pixelated; touch-action:none; }
+    .gif-render-element { position:absolute; left:0; top:0; z-index:1; pointer-events:none; image-rendering: pixelated; }
   </style>
 </head>
 <body>
 <div id="gameContainer">
-  <video id="bgVideo" autoplay loop muted playsinline preload="auto" style="pointer-events: none;">
-    <source src="bg_soul_scroll_light_h254.mp4" type="video/mp4">
-  </video>
-  <canvas id="gameCanvas" width="1080" height="1920"></canvas>
-  <div id="overlay">
-    <div id="stateLabel"></div>
-    <div class="center" id="menuScreen">
-      <h1>飞机大战 - 动漫风弹幕版</h1>
-      <p>控制方式：鼠标移动飞机（机头朝上），自动射击</p>
-      <p>提示：按空格或点击下方按钮开始游戏</p>
-      <button id="startButton">开始游戏</button>
-    </div>
-    <div class="center" id="gameOverScreen" style="display:none;">
-      <h1>游戏结束</h1>
-      <p id="gameOverDesc"></p>
-      <button id="restartButton">重新开始</button>
-    </div>
-  </div>
+<canvas id="backCanvas"></canvas>
+<div id="enemyOverlay"></div>
+<canvas id="frontCanvas"></canvas>
+<img id="playerGif" class="gif-render-element" src="rouge_webps/player.webp" alt="" style="display:none;">
 </div>
-
 <script>
-// ======== 背景视频初始化 ========
-(function() {
-  const video = document.getElementById('bgVideo');
-  let playAttempted = false;
-  
-  console.log('🎬 视频元素:', video);
-  console.log('📹 视频 src:', video.querySelector('source').src);
-  
-  video.addEventListener('loadstart', () => console.log('✅ 视频开始加载'));
-  video.addEventListener('loadedmetadata', () => {
-    console.log('✅ 视频元数据已加载');
-    console.log(`📊 视频尺寸: ${video.videoWidth} x ${video.videoHeight}`);
-  });
-  video.addEventListener('loadeddata', () => console.log('✅ 视频数据已加载'));
-  video.addEventListener('canplay', () => {
-    console.log('✅ 视频可以播放');
-    // 只在视频可以播放时尝试一次
-    if (!playAttempted) {
-      playAttempted = true;
-      tryPlayVideo();
-    }
-  });
-  video.addEventListener('playing', () => console.log('✅ 视频正在播放'));
-  video.addEventListener('pause', () => console.log('⏸️ 视频暂停'));
-  video.addEventListener('error', (e) => {
-    console.error('❌ 视频加载错误:', e);
-    if (video.error) {
-      console.error('❌ 错误详情:', {
-        code: video.error.code,
-        message: video.error.message
-      });
-    }
-  });
-  
-  function tryPlayVideo() {
-    if (video.paused) {
-      video.play().then(() => {
-        console.log('✅ 播放成功');
-      }).catch(err => {
-        console.warn('⚠️ 自动播放失败 (可能需要用户交互):', err.message);
-        // 在用户点击开始按钮时播放
-        const startBtn = document.getElementById('startButton');
-        if (startBtn) {
-          const playOnClick = () => {
-            video.play().catch(e => console.error('播放失败:', e));
-            startBtn.removeEventListener('click', playOnClick);
-          };
-          startBtn.addEventListener('click', playOnClick);
-        }
-      });
-    }
-  }
-})();
+(() => {
+  'use strict';
+  const SHOW_SKILL_DEBUG = true;
 
-/*
-  核心约束与实现说明（已落实到代码中）：
-  - 物理参数全部取自 GameManifest.meta.physicsConfig；
-  - 所有逻辑尺寸 / 碰撞盒来自 GameManifest.entities.*.logicSize；
-  - 鼠标跟随控制：每帧 player.center = 鼠标位置，并做边界 Clamp（禁止超出画布）；
-  - 玩家子弹自动全速发射，射速 = 当前攻击等级 fireRate（发/秒），使用冷却计时器；
-  - 玩家子弹朝上 (0,-1)，速度=1200 像素/秒；
-  - 敌机与敌弹朝下 (0,1)，Boss 额外有全向 / 跟踪弹；
-  - 敌机数量：低级 10、中级 5、Boss 1，按 GDD 波次规则刷新；
-  - 掉落顺序严格：低级→中级→Boss，使用全局阶段标志，保证每种攻击奖励只掉一次；
-  - 所有奖励掉落物竖直向下，速度 260 像素/秒，快于任意敌机竖直速度；
-  - Boss 三种子弹模式可叠加（普通、跟踪、群发），独立冷却；
-  - Boss 跟踪弹转向角速度上限 90°/秒；
-  - 撞击与子弹命中均使用 AABB，根据 logicSize 构造碰撞盒；
-  - 边界约束：玩家与所有敌机 / Boss 均不允许飞出逻辑可见区；
-  - 碰撞穿越时立即位置修正并清空对应方向速度（主要用于敌机/Boss 的边界反弹与 Clamp）；
-  - 渲染：使用一个 canvas+原生 JS 的主循环 (requestAnimationFrame)；
-  - 所有 GIF 路径与 GameManifest.assets.src 完全一致；使用等比例缩放 scale=min(logicW/texW,logicH/texH)，居中绘制。
-*/
+  const MANIFEST = {
+    physicsConfig: { speedBase:3.2, friction:0.86, knockback:220, pickupRadius:72 },
+    assets: {
+      Victor:{logicSize:{width:128,height:128}}, enemy_skeleton_marksman:{logicSize:{width:96,height:96}}, enemy_bloodthirsty_gargoyle:{logicSize:{width:96,height:96}}, enemy_toxic_ghoul:{logicSize:{width:96,height:96}}, enemy_common_undead_demon:{logicSize:{width:96,height:96}}, enemy_heavy:{logicSize:{width:192,height:192}}, enemy_flying:{logicSize:{width:96,height:96}}
+    },
+    levelConfig:{spawnWeights:{top:0.4,bottom:0.4,left:0.1,right:0.1}}
+  };
 
-/* ======== GameManifest（硬编码结构） ======== */
-const GameManifest = {
-  meta: {
-    gameTitle: "飞机大战 - 动漫风弹幕版",
-    screenSize: { width: 1080, height: 1920 },
-    physicsConfig: {
-      gravity: 0,
-      jumpVelocity: 0,
-      moveSpeed: 600,
-      playerBulletSpeed: 1200,
-      enemySpeedLow: 200,
-      enemySpeedMidVertical: 300,
-      enemySpeedMidHorizontal: 150,
-      enemySpeedBoss: 250,
-      enemySpeedBoss23: 375, // 1.5倍速度
-      enemyBulletSpeedLow: 400,
-      enemyBulletSpeedMid: 550,
-      bossBulletSpeedNormal: 650,
-      bossBulletSpeedTrack: 400,
-      bossBulletSpeedSpread: 300,
-      playerAtkRateLv1: 3,
-      playerAtkRateLv2: 4,
-      playerAtkRateLv3: 6,
-      playerAtkRateLv4: 12, // 修改：增加区分度，从 8 调快到 12
-      playerDamageLv1: 1,
-      playerDamageLv2: 2,
-      playerDamageLv3: 3,
-      playerDamageLv4: 5,
-      enemyAtkRateBase: 0.3,
-      bossBulletRateNormal: 0.6,
-      bossBulletRateTrack: 0.3,
-      bossBulletRateSpread: 0.2,
-      dropSpeed: 260,
-      playerMaxHP: 8,
-      enemyHP_Low: 8,
-      enemyHP_Mid: 20,
-      enemyHP_Boss: 1000
-    }
-  },
-  entities: {
+  const PERF = { DT_MAX:0.04, TARGET_W:540, TARGET_H:960, BULLET_INTERVAL:2.2, BULLET_RANGE:520 };
+  const COMBAT_TUNING = {
+    maxSkillLv: 20,
     player: {
-      logicSize: { width: 192, height: 256 },
-      bulletSize: { width: 12, height: 48 },
-      hp: 8,
-      controlMode: "mouse_follow",
-      attackLevels: {
-        1: {
-          damage: 1,
-          fireRate: 3,
-          bulletAssetId: "fx_player_bullet_lv1",
-          bodyAssetId: "player_body_lv1"
-        },
-        2: {
-          damage: 2,
-          fireRate: 4,
-          bulletAssetId: "fx_player_bullet_lv2",
-          bodyAssetId: "player_body_lv2"
-        },
-        3: {
-          damage: 3,
-          fireRate: 6,
-          bulletAssetId: "fx_player_bullet_lv3",
-          bodyAssetId: "player_body_lv3"
-        },
-        4: {
-          damage: 5,
-          fireRate: 6, // 攻击等级4的攻速为原来的一半（12 -> 6）
-          bulletAssetId: "fx_player_bullet_lv4",
-          bodyAssetId: "player_body_lv4"
+      baseHp: 520,
+      baseLifeSteal: 0.11,
+      regenPerTick: 0.8,
+      maxHpUpgradeGain: 24,
+      lifeStealPerLv: 0.008,
+      movePerLv: 0.035,
+      regenPerLv: 0.12,
+      atkPerLv: 0.06
+    },
+    skillBaseDmg: 14,
+    skillDmgMult: { slash: 1.0, dash: 1.25, arcane: 0.92 },
+    enemyGrowth: {
+      everySec: 20,
+      hpPerStep: 0.095,
+      dmgPerStep: 0.075
+    },
+    spawn: {
+      intervalStart: 1.08,
+      intervalMin: 0.40,
+      intervalDropPerSec: 0.00135,
+      flyingPackStep: 4
+    },
+    visual: {
+      rangedEnemyScale: 1.5,
+      rangedBulletScale: 64
+    },
+    dash: {
+      widthBase: 56,
+      widthPerLv: 5,
+      lenBaseRatio: 0.55,
+      lenPerLv: 20,
+      spriteBase: 42,
+      spritePerLv: 2.2,
+      knockbackBase: 320,
+      knockbackPerLv: 34,
+      knockbackDurBase: 0.26,
+      knockbackDurPerLv: 0.012
+    },
+    enemy: {
+      melee: { hp: 48, contactDmg: 8, attackCd: 0.8 },
+      ranged: { hp: 38, bulletDmg: 9, bulletInterval: 1.9 },
+      heavy: { hp: 155, contactDmg: 17, attackCd: 2.55 },
+      flying: { hp: 30, contactDmg: 7, attackCd: 0.72, packCount: 4 }
+    }
+  };
+  const backCanvas = document.getElementById('backCanvas');
+  const frontCanvas = document.getElementById('frontCanvas');
+  const backCtx = backCanvas.getContext('2d');
+  const ctx = frontCanvas.getContext('2d');
+  const enemyOverlay = document.getElementById('enemyOverlay');
+  const playerGifEl = document.getElementById('playerGif');
+  const loadingState = { total:0, done:0, ready:false };
+  function registerLoadingTask(taskPromise){
+    loadingState.total++;
+    Promise.resolve(taskPromise).catch(()=>{}).finally(()=>{
+      loadingState.done++;
+      if(loadingState.done>=loadingState.total) loadingState.ready=true;
+    });
+  }
+  function waitImageAsset(img){
+    return new Promise(resolve=>{
+      if(img.complete) return resolve();
+      img.addEventListener('load', resolve, {once:true});
+      img.addEventListener('error', resolve, {once:true});
+    });
+  }
+  const imgSlash = new Image();
+  imgSlash.onload = () => { const b = getOpaqueBounds(imgSlash); if(b) opaqueBoundsCache.slash = b; };
+  imgSlash.src = 'rouge_webps/player_sl_0.png';
+  const imgDashThrust = new Image();
+  imgDashThrust.onload = () => { const b = getOpaqueBounds(imgDashThrust); if(b) opaqueBoundsCache.dash = b; };
+  imgDashThrust.src = 'rouge_webps/player_sl_1.webp';
+  imgDashThrust.onerror = function(){ if(this.src.indexOf('.png')<0) this.src='rouge_webps/player_sl_1.png'; };
+  const imgTile01 = new Image(); imgTile01.src = 'tile_01.png';
+  const imgTile02 = new Image(); imgTile02.src = 'tile_02.png';
+  const PLAYER_WEBP_FPS = 12 * 0.8 * 0.8 * 0.5;
+  const playerWebpState = { ready: false, frames: [], frameCount: 0, useImgFallback: false };
+  const enemyAssetSrcs = ['rouge_webps/enemy_0.webp','rouge_webps/enemy_1.webp','rouge_webps/enemy_2.webp','rouge_webps/enemy_3.webp'];
+  const enemyAttackSrcs = { melee: 'rouge_webps/enemy_attack_0.webp', heavy: 'rouge_webps/enemy_attack_2.webp' };
+  const HEAVY_ATTACK_DUR = 1.0;
+  function syncEnemyGif(e, typeIdx, ox, oy, faceRight, overrideSrc){
+    if(!e.gifEl){
+      e.gifEl = document.createElement('img');
+      e.gifEl.className = 'gif-render-element';
+      e.gifEl.style.position = 'absolute';
+      e.gifEl.style.transformOrigin = '50% 50%';
+      e.gifEl.style.imageRendering = 'pixelated';
+      enemyOverlay.appendChild(e.gifEl);
+      e.gifTypeIdx = -1;
+    }
+    const useSrc = overrideSrc || enemyAssetSrcs[typeIdx];
+    const cacheKey = overrideSrc || typeIdx;
+    if(e.gifTypeIdx !== cacheKey){ e.gifEl.src = useSrc; e.gifTypeIdx = cacheKey; }
+    e.gifEl.style.display='block';
+    const tx = (e.x + ox) * scale, ty = (e.y + oy) * scale, ew = e.w * scale, eh = e.h * scale;
+    e.gifEl.style.width = Math.round(ew) + 'px';
+    e.gifEl.style.height = Math.round(eh) + 'px';
+    const flip = e.ranged ? !faceRight : faceRight;
+    e.gifEl.style.transform = `translate(${Math.round(tx - ew/2)}px,${Math.round(ty - eh/2)}px) scaleX(${flip ? 1 : -1})`;
+    e.gifEl.style.display = 'block';
+  }
+  const playerWebpLoadTask = (async () => {
+    if (typeof ImageDecoder === 'undefined') { playerWebpState.useImgFallback = true; return; }
+    try {
+      const r = await fetch('rouge_webps/player.webp');
+      if (!r.ok) { playerWebpState.useImgFallback = true; return; }
+      const blob = await r.blob();
+      const decoder = new ImageDecoder({ data: blob, type: 'image/webp' });
+      await decoder.tracks.ready;
+      const track = decoder.tracks.selectedTrack;
+      if (!track.animated || track.frameCount === 0) { playerWebpState.useImgFallback = true; return; }
+      const n = track.frameCount;
+      for (let i = 0; i < n; i++) {
+        const { image } = await decoder.decode({ frameIndex: i });
+        playerWebpState.frames.push(await createImageBitmap(image));
+        image.close();
+      }
+      playerWebpState.frameCount = n;
+      playerWebpState.ready = true;
+      const b = getOpaqueBounds(playerWebpState.frames[0]);
+      if(b) opaqueBoundsCache.player = b;
+    } catch (_) { playerWebpState.useImgFallback = true; }
+  })();
+  // START - Modification 1: Declare arcaneOrbImg
+  const arcaneOrbImg = new Image();
+  arcaneOrbImg.onload = () => { const b = getOpaqueBounds(arcaneOrbImg); if(b) opaqueBoundsCache.arcaneOrb = b; };
+  arcaneOrbImg.src = 'rouge_webps/player_sl_2.webp';
+  const enemyAttackImg = new Image();
+  enemyAttackImg.src = 'rouge_webps/enemy_attack_1.webp';
+  const heavyAttackImg = new Image();
+  heavyAttackImg.src = 'rouge_webps/enemy_attack_2.webp';
+  const meleeAttackImg = new Image();
+  meleeAttackImg.src = 'rouge_webps/enemy_attack_0.webp';
+  const meleeAttackFrames = { frames: [], frameCount: 0, ready: false };
+  const heavyAttackFrames = { frames: [], frameCount: 0, ready: false };
+  const enemyAttackFrameTask = (async () => {
+    if (typeof ImageDecoder === 'undefined' || !ImageDecoder.isTypeSupported?.('image/webp')) return;
+    for (const [fs, path] of [[meleeAttackFrames, 'rouge_webps/enemy_attack_0.webp'], [heavyAttackFrames, 'rouge_webps/enemy_attack_2.webp']]) {
+      try {
+        const r = await fetch(path);
+        if (!r.ok) continue;
+        const decoder = new ImageDecoder({ data: await r.blob(), type: 'image/webp' });
+        await decoder.tracks.ready;
+        if (decoder.completed) await decoder.completed;
+        const track = decoder.tracks.selectedTrack;
+        const n = (track && track.frameCount) || 0;
+        if (n <= 0) continue;
+        for (let i = 0; i < n; i++) {
+          const { image } = await decoder.decode({ frameIndex: i });
+          fs.frames.push(await createImageBitmap(image));
+          image.close();
         }
-      },
-      transformAssets: {
-        1: "player_transform_1",
-        2: "player_transform_2",
-        3: "player_transform_3"
-      },
-      explosionAssetId: "fx_explosion_small"
-    },
-    enemies: {
-      low: {
-        logicSize: { width: 200, height: 275 },
-        hp: 8,
-        moveSpeedVertical: 200,
-        movePattern: "straight_down",
-        bulletAssetId: "fx_enemy_low_bullet",
-        bodyAssetId: "enemy_low_body",
-        explosionAssetId: "fx_explosion_small"
-      },
-      mid: {
-        logicSize: { width: 336, height: 448 },
-        hp: 20,
-        moveSpeedVertical: 300,
-        moveSpeedHorizontal: 150,
-        movePattern: "down_with_random_horizontal",
-        bulletAssetId: "fx_enemy_mid_bullet",
-        bodyAssetId: "enemy_mid_body",
-        explosionAssetId: "fx_explosion_small"
-      },
-      boss: {
-        logicSize: { width: 480, height: 576 }, // 320*1.5, 384*1.5
-        hp: 1000,
-        moveSpeed: 250,
-        moveArea: "top_half",
-        bodyAssetIdPhaseA: "boss_body",
-        bodyAssetIdPhaseC: "boss_body_half",
-        transformToHalfAssetId: "boss_transform_half",
-        disintegrateAssetId: "boss_disintegrate",
-        explosionAssetId: "fx_explosion_boss",
-        bulletAssets: {
-          normal: "boss_lightning_normal",
-          track: "boss_lightning_track",
-          spread: "boss_lightning_spread"
-        }
-      },
-      boss2: {
-        logicSize: { width: 480, height: 576 },
-        hp: 1000,
-        moveSpeed: 375,
-        bodyAssetId: "boss2_body"
-      },
-      boss3: {
-        logicSize: { width: 480, height: 576 },
-        hp: 1000,
-        moveSpeed: 375,
-        bodyAssetId: "boss3_body"
-      }
-    },
-    items: {
-      attackReward: {
-        logicSize: { width: 32, height: 32 },
-        assetId: "item_reward_attack",
-        effectStages: {
-          1: { attackLevel: 2 },
-          2: { attackLevel: 3 },
-          3: { attackLevel: 4 }
-        }
-      },
-      hpReward: {
-        logicSize: { width: 32, height: 32 },
-        assetId: "item_reward_hp",
-        effects: {
-          mid: { heal: 3 },
-          boss: { heal: "full" }
-        }
-      }
-    },
-    fx: {
-      playerExplosion: {
-        logicSize: { width: 128, height: 128 },
-        assetId: "fx_explosion_small"
-      },
-      bossExplosion: {
-        logicSize: { width: 384, height: 384 },
-        assetId: "fx_explosion_boss"
-      }
+        fs.frameCount = n;
+        fs.ready = true;
+      } catch (_) {}
     }
-  },
-  levelConfig: {
-    dropRules: {
-      attackRewardOrder: ["low", "mid", "boss"],
-      midHpRewardOnce: true,
-      bossAttackDropHpThreshold: 166,
-      bossHpDropHpThreshold: 83
-    }
-  },
-  assets: {
-    player_body_lv1: {
-      type: "animation",
-      logicSize: { width: 192, height: 256 },
-      frameCount: 1,
-      src: "player_v1_final.gif"
-    },
-    player_body_lv2: {
-      type: "animation",
-      logicSize: { width: 192, height: 256 },
-      frameCount: 1,
-      src: "player_v2_final.gif"
-    },
-    player_body_lv3: {
-      type: "animation",
-      logicSize: { width: 192, height: 256 },
-      frameCount: 1,
-      src: "player_v3_final.gif"
-    },
-    player_body_lv4: {
-      type: "animation",
-      logicSize: { width: 192, height: 256 },
-      frameCount: 1,
-      src: "player_v3_final.gif"
-    },
-    player_transform_1: {
-      type: "animation",
-      logicSize: { width: 192, height: 256 },
-      frameCount: 16,
-      src: "grid_player_transform_1.png"
-    },
-    player_transform_2: {
-      type: "animation",
-      logicSize: { width: 192, height: 256 },
-      frameCount: 16,
-      src: "grid_player_transform_2.png"
-    },
-    player_transform_3: {
-      type: "animation",
-      logicSize: { width: 192, height: 256 },
-      frameCount: 16,
-      src: "grid_player_transform_3.png"
-    },
-    player_upgrade_flash: {
-      type: "animation",
-      logicSize: { width: 256, height: 256 },
-      frameCount: 16,
-      fps: 20,
-      src: "player_upgrade_flash.gif"
-    },
-    fx_player_bullet_lv1: {
-      type: "animation",
-      logicSize: { width: 12, height: 48 },
-      frameCount: 16,
-      src: "grid_player_bullet_lv1.png"
-    },
-    fx_player_bullet_lv2: {
-      type: "animation",
-      logicSize: { width: 12, height: 48 },
-      frameCount: 16,
-      src: "grid_player_bullet_lv2.png"
-    },
-    fx_player_bullet_lv3: {
-      type: "animation",
-      logicSize: { width: 12, height: 48 },
-      frameCount: 16,
-      src: "grid_player_bullet_lv3.png"
-    },
-    fx_player_bullet_lv4: {
-      type: "animation",
-      logicSize: { width: 12, height: 48 },
-      frameCount: 16,
-      src: "grid_player_bullet_lv4.png"
-    },
-    enemy_low_body: {
-      type: "animation",
-      logicSize: { width: 200, height: 275 },
-      frameCount: 16,
-      src: "enemy_plane1.gif"
-    },
-    enemy_mid_body: {
-      type: "animation",
-      logicSize: { width: 336, height: 448 },
-      frameCount: 16,
-      src: "enemy_plane3.gif"
-    },
-    boss_body: {
-      type: "animation",
-      logicSize: { width: 480, height: 576 },
-      frameCount: 1,
-      src: "enemy_plane_ref2_final.gif"
-    },
-    boss_body_half: {
-      type: "animation",
-      logicSize: { width: 480, height: 576 },
-      frameCount: 1,
-      src: "enemy_plane_ref2_final.gif"
-    },
-    boss2_body: {
-      type: "animation",
-      logicSize: { width: 480, height: 576 },
-      frameCount: 1,
-      src: "enemy_plane_ref4_final.gif"
-    },
-    boss3_body: {
-      type: "animation",
-      logicSize: { width: 480, height: 576 },
-      frameCount: 1,
-      src: "enemy_plane_ref5_final.gif"
-    },
-    boss_transform_half: {
-      type: "animation",
-      logicSize: { width: 480, height: 576 },
-      frameCount: 1,
-      fps: 5,
-      src: "enemy_plane_ref2_final.gif"
-    },
-    boss_disintegrate: {
-      type: "animation",
-      logicSize: { width: 480, height: 576 },
-      frameCount: 16,
-      fps: 5,
-      src: "boss_disintegrate.gif"
-    },
-    fx_enemy_low_bullet: {
-      type: "animation",
-      logicSize: { width: 8, height: 16 },
-      frameCount: 16,
-      src: "grid_enemy_low_bullet.png"
-    },
-    fx_enemy_mid_bullet: {
-      type: "animation",
-      logicSize: { width: 10, height: 19 },
-      frameCount: 16,
-      src: "grid_enemy_mid_bullet.png"
-    },
-    boss_lightning_normal: {
-      type: "code_generated",
-      logicSize: { width: 48, height: 96 } // 原 96*192 的一半
-    },
-    boss_lightning_track: {
-      type: "code_generated",
-      logicSize: { width: 64, height: 64 } // 原 128*128 的一半
-    },
-    boss_lightning_spread: {
-      type: "code_generated",
-      logicSize: { width: 112, height: 112 } // 原 224*224 的一半
-    },
-    item_reward_attack: {
-      type: "animation",
-      logicSize: { width: 32, height: 32 },
-      frameCount: 16,
-      src: "grid_item_reward_attack.png"
-    },
-    item_reward_hp: {
-      type: "animation",
-      logicSize: { width: 32, height: 32 },
-      frameCount: 16,
-      src: "grid_item_reward_hp.png"
-    },
-    fx_explosion_small: {
-      type: "animation",
-      logicSize: { width: 128, height: 128 },
-      frameCount: 9,
-      src: "grid_fx_explosion.png"
-    },
-    fx_explosion_boss: {
-      type: "animation",
-      logicSize: { width: 384, height: 384 },
-      frameCount: 9,
-      src: "grid_fx_explosion.png"
-    }
+  })();
+  playerGifEl.addEventListener('load', () => {
+    if(!opaqueBoundsCache.player){ const b = getOpaqueBounds(playerGifEl); if(b) opaqueBoundsCache.player = b; }
+  });
+  if(playerGifEl.complete && playerGifEl.naturalWidth && !opaqueBoundsCache.player){
+    const b = getOpaqueBounds(playerGifEl); if(b) opaqueBoundsCache.player = b;
   }
-};
-
-/* ======== 物理配置校验（强制要求） ======== */
-if (!GameManifest.meta || !GameManifest.meta.physicsConfig) {
-  throw new Error("GameManifest.meta.physicsConfig 缺失或为 null，物理配置加载失败。");
-}
-const phys = GameManifest.meta.physicsConfig;
-
-/* ======== 资源加载：校验 src 与真实文件存在性 ======== */
-const ExistingFiles = new Set([
-  "enemy_plane_ref2_final.gif",
-  "enemy_plane_ref4_final.gif",
-  "enemy_plane_ref5_final.gif",
-  "boss_test.gif",
-  "boss_body_half.gif",
-  "boss_disintegrate.gif",
-  "boss_transform.gif",
-  "grid_boss_body.png",
-  "grid_boss_bullet_normal.png",
-  "grid_boss_bullet_spread.png",
-  "grid_boss_bullet_track.png",
-  "grid_boss_disintegrate.png",
-  "grid_boss_transform_half.png",
-  "grid_enemy_low_body.png",
-  "grid_enemy_low_bullet.png",
-  "grid_enemy_mid_body.png",
-  "grid_enemy_mid_bullet.png",
-  "grid_fx_explosion.png",
-  "grid_item_reward_attack.png",
-  "grid_item_reward_hp.png",
-  "grid_player_body.png",
-  "grid_player_bullet_lv1.png",
-  "grid_player_bullet_lv2.png",
-  "grid_player_bullet_lv3.png",
-  "grid_player_bullet_lv4.png",
-  "grid_player_transform_1.png",
-  "grid_player_transform_2.png",
-  "grid_player_transform_3.png",
-  "player_upgrade_flash.gif",
-  "enemy_plane1.gif",
-  "enemy_plane2.gif",
-  "enemy_plane3.gif",
-  "player_v1_final.gif",
-  "player_v2_final.gif",
-  "player_v3_final.gif"
-]);
-
-// 校验所有 assets.src 非空且文件存在 (跳过代码生成的)
-for (const [id, a] of Object.entries(GameManifest.assets)) {
-  if (a.type === "code_generated") continue;
-  if (!a.src) {
-    throw new Error("资产 " + id + " 的 src 为空，请先提供素材 GIF 文件。");
+  registerLoadingTask(playerWebpLoadTask);
+  registerLoadingTask(enemyAttackFrameTask);
+  for(const img of [imgSlash,imgDashThrust,imgTile01,imgTile02,arcaneOrbImg,enemyAttackImg,heavyAttackImg,meleeAttackImg,playerGifEl]){
+    registerLoadingTask(waitImageAsset(img));
   }
-  if (!ExistingFiles.has(a.src)) {
-    throw new Error("资产 " + id + " 所需文件 " + a.src + " 不存在，请先生成该 GIF 素材。");
+  // END - Modification 1
+  let vw=PERF.TARGET_W, vh=PERF.TARGET_H, scale=1;
+  function resize(){
+    const w=window.innerWidth,h=window.innerHeight;
+    scale=Math.min(w/PERF.TARGET_W,h/PERF.TARGET_H);
+    const cw=Math.floor(PERF.TARGET_W*scale), ch=Math.floor(PERF.TARGET_H*scale);
+    backCanvas.width=frontCanvas.width=cw; backCanvas.height=frontCanvas.height=ch;
+    const container=document.getElementById('gameContainer');
+    if(container){ container.style.width=cw+'px'; container.style.height=ch+'px'; }
+    if(enemyOverlay){ enemyOverlay.style.width=cw+'px'; enemyOverlay.style.height=ch+'px'; }
+    vw=PERF.TARGET_W; vh=PERF.TARGET_H;
+    backCtx.setTransform(scale,0,0,scale,0,0);
+    ctx.setTransform(scale,0,0,scale,0,0);
   }
-}
-
-// 动画资源封装：支持 Sprite Sheet (网格图) 裁剪播放
-class Sprite {
-  constructor(assetId) {
-    this.assetId = assetId;
-    const asset = GameManifest.assets[assetId];
-    this.logicW = asset.logicSize.width;
-    this.logicH = asset.logicSize.height;
-    if (asset.type === "code_generated") {
-        this.loaded = true;
-        this.isGif = false;
-        this.isCodeGenerated = true;
-        return;
-    }
-    this.frameCount = asset.frameCount || 1;
-    this.image = new Image();
-    this.image.src = asset.src;
-    this.loaded = false;
-    this.isGif = asset.src.toLowerCase().endsWith('.gif');
-    this.image.onload = () => {
-      this.loaded = true;
-      if (!this.isGif) {
-        // 动态计算列数：16帧对应 4列，9帧对应 3列
-        this.cols = (this.frameCount === 16) ? 4 : 3;
-        this.rows = Math.ceil(this.frameCount / this.cols);
-        this.texW = this.image.width / this.cols;
-        this.texH = this.image.height / this.rows;
-        
-        const scale = Math.min(this.logicW / this.texW, this.logicH / this.texH);
-        this.drawW = this.texW * scale;
-        this.drawH = this.texH * scale;
-      } else {
-        // GIF 资产，等比例缩放
-        const scale = Math.min(this.logicW / this.image.width, this.logicH / this.image.height);
-        this.drawW = this.image.width * scale;
-        this.drawH = this.image.height * scale;
-      }
-    };
-    this.time = 0;
-    this.fps = asset.fps || 10; // 默认 10 帧每秒
-    this.duration = this.frameCount / this.fps; 
-  }
-  update(dt) {
-    if (this.isCodeGenerated) return;
-    this.time += dt;
-    if (this.time >= this.duration) {
-      this.time -= this.duration;
-    }
-  }
-  draw(ctx, x, y) {
-    if (!this.loaded || this.isCodeGenerated) return;
-    
-    if (this.isGif) {
-      // GIF 渲染：居中等比例缩放 (Canvas 仅保留首帧作为兜底)
-      ctx.drawImage(this.image, x - this.drawW / 2, y - this.drawH / 2, this.drawW, this.drawH);
-      return;
-    }
-
-    // 计算当前应该播放哪一帧
-    const frameIndex = Math.floor((this.time / this.duration) * this.frameCount) % this.frameCount;
-    const r = Math.floor(frameIndex / this.cols);
-    const c = frameIndex % this.cols;
-    
-    const w = this.drawW;
-    const h = this.drawH;
-    
-    // 使用 9 参数 drawImage 进行裁剪绘制
-    ctx.drawImage(
-      this.image, 
-      c * this.texW, r * this.texH, this.texW, this.texH, // 源矩形 (网格中的某一帧)
-      x - w / 2, y - h / 2, w, h                         // 目标矩形 (Canvas 位置)
-    );
-  }
-}
-
-/* ======== 动画实例缓存 ======== */
-const SpriteCache = {};
-function getSprite(assetId) {
-  if (!SpriteCache[assetId]) {
-    SpriteCache[assetId] = new Sprite(assetId);
-  }
-  return SpriteCache[assetId];
-}
-
-// 新增：GIF 同步渲染辅助函数，符合 "优先使用 <img> 展示 GIF" 规则
-function syncEntityGif(entity, assetId) {
-  const sprite = getSprite(assetId);
-  const asset = GameManifest.assets[assetId];
-  if (!sprite.isGif) {
-    if (entity.gifEl) {
-      entity.gifEl.remove();
-      entity.gifEl = null;
-      entity.currentGifAssetId = null;
-    }
-    return false;
-  }
-
-  if (!entity.gifEl) {
-    entity.gifEl = document.createElement('img');
-    entity.gifEl.className = 'gif-render-element';
-    document.getElementById('gameContainer').appendChild(entity.gifEl);
-  }
-  if (entity.currentGifAssetId !== assetId) {
-    entity.gifEl.src = asset.src;
-    entity.currentGifAssetId = assetId;
-  }
-
-  // 修改：即使 sprite 还没 onload 完成，也使用 logicSize 兜底位置，确保 GIF 能立即显示
-  const dw = sprite.loaded ? sprite.drawW : asset.logicSize.width;
-  const dh = sprite.loaded ? sprite.drawH : asset.logicSize.height;
-
-  entity.gifEl.style.width = dw + 'px';
-  entity.gifEl.style.height = dh + 'px';
-  entity.gifEl.style.left = (entity.x - dw / 2) + 'px';
-  entity.gifEl.style.top = (entity.y - dh / 2) + 'px';
-  return true;
-}
-
-/* ======== Canvas & 基础设置 ======== */
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
-const GAME_WIDTH = canvas.width;
-const GAME_HEIGHT = canvas.height;
-
-const GameStateEnum = {
-  LOADING: "LOADING",
-  MENU: "MENU",
-  PLAYING: "PLAYING",
-  GAME_OVER: "GAME_OVER"
-};
-let gameState = GameStateEnum.LOADING;
-
-/* ======== 鼠标输入（硬绑定玩家位置） ======== */
-let mouseX = GAME_WIDTH / 2;
-let mouseY = GAME_HEIGHT * 0.8;
-canvas.addEventListener("mousemove", (e) => {
-  const rect = canvas.getBoundingClientRect();
-  mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-  mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
-});
-// 防止鼠标不在画布时位置失效：窗口鼠标移动时也更新
-window.addEventListener("mousemove", (e) => {
-  const rect = canvas.getBoundingClientRect();
-  if (
-    e.clientX >= rect.left &&
-    e.clientX <= rect.right &&
-    e.clientY >= rect.top &&
-    e.clientY <= rect.bottom
-  ) {
-    mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-    mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
-  }
-});
-
-/* ======== UI 绑定 ======== */
-const overlayMenu = document.getElementById("menuScreen");
-const overlayGameOver = document.getElementById("gameOverScreen");
-const gameOverDesc = document.getElementById("gameOverDesc");
-const stateLabel = document.getElementById("stateLabel");
-
-document.getElementById("startButton").onclick = () => startGame();
-document.getElementById("restartButton").onclick = () => startGame();
-
-window.addEventListener("keydown", (e) => {
-  if (e.code === "Space") {
-    if (gameState === GameStateEnum.MENU || gameState === GameStateEnum.GAME_OVER) {
-      startGame();
-    }
-  }
-});
-
-/* ======== 实用函数 ======== */
-function clamp(v, min, max) {
-  return v < min ? min : v > max ? max : v;
-}
-function normalizeAngle(a) {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
-}
-function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
-  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-}
-
-/* ======== 全局对象与计数 ======== */
-let lastTime = performance.now();
-
-let player;
-let enemies = [];      // 低级 / 中级
-let boss = null;
-let bosses = [];       // 用于存放 Boss2, Boss3
-let currentBossWave = 1; // 1: Boss 1, 2: Boss 2 & 3
-let playerBullets = [];
-let enemyBullets = [];
-let items = [];
-let fxOneShots = [];   // 爆炸 / 变形 / 解体等
-
-// 波次状态
-let lowSpawned = 0;
-let lowKilled = 0;
-let midSpawned = 0;
-let midKilled = 0;
-let bossSpawned = false;
-let spawnTickTimer = 0;
-const spawnTickInterval = 2.0; // 每 2 秒刷一次
-
-// 掉落状态机
-let globalAttackRewardStage = 0;      // 0:未掉;1:掉攻1;2:掉攻2;3:掉攻3
-let globalHPRewardDropped_mid = false;
-let globalBossAttackDropDone = false;
-let globalBossHpDropDone = false;
-
-// Boss 状态标志
-let bossTransformPlayed = false;
-
-/* ======== 实体类 ======== */
-
-// 玩家
-class Player {
-  constructor() {
-    const logic = GameManifest.entities.player.logicSize;
-    this.width = logic.width;
-    this.height = logic.height;
-    this.x = GAME_WIDTH / 2;
-    this.y = GAME_HEIGHT * 0.8;
-    this.maxHP = phys.playerMaxHP;
-    this.hp = this.maxHP;
-    this.attackLevel = 1;
-    this.bulletCooldown = 0;
-    this.isAlive = true;
-    this.bodySpriteId = GameManifest.entities.player.attackLevels[1].bodyAssetId;
-    this.bulletSpriteId = GameManifest.entities.player.attackLevels[1].bulletAssetId;
-    this.damageMultiplier = 1.0;
-    this.fireRateMultiplier = 1.0;
-    this.gifEl = null;
-    this.currentGifAssetId = null;
-  }
-  getDamage() {
-    const cfg = GameManifest.entities.player.attackLevels[this.attackLevel];
-    return cfg.damage * this.damageMultiplier;
-  }
-  getFireRate() {
-    const cfg = GameManifest.entities.player.attackLevels[this.attackLevel];
-    return cfg.fireRate * this.fireRateMultiplier;
-  }
-  update(dt) {
-    // 鼠标硬跟随 + Clamp
-    const halfW = this.width / 2;
-    const halfH = this.height / 2;
-    this.x = clamp(mouseX, halfW, GAME_WIDTH - halfW);
-    this.y = clamp(mouseY, halfH, GAME_HEIGHT - halfH);
-
-    // 飞机机身动画
-    getSprite(this.bodySpriteId).update(dt);
-
-    // 自动射击
-    const fireRate = this.getFireRate();
-    if (fireRate > 0 && this.isAlive) {
-      this.bulletCooldown -= dt;
-      if (this.bulletCooldown <= 0) {
-        this.shoot();
-        this.bulletCooldown += 1 / fireRate;
-      }
-    }
-  }
-  shoot() {
-    const bs = GameManifest.entities.player.bulletSize;
-    // 子弹尺寸随攻击等级增大，每级宽度增加 2px，高度增加 4px
-    const w = bs.width + (this.attackLevel - 1) * 2;
-    const h = bs.height + (this.attackLevel - 1) * 4;
-    
-    // 只有攻击奖励提升的等级会增加子弹列
-    const numColumns = this.attackLevel;
-    const spacing = 24; // 列间距
-    
-    for (let i = 0; i < numColumns; i++) {
-      // 计算偏移：使所有子弹列的中轴与飞机对齐
-      const offsetX = (i - (numColumns - 1) / 2) * spacing;
-      const bullet = new PlayerBullet(
-        this.x + offsetX,
-        this.y - this.height / 2,
-        w,
-        h,
-        -phys.playerBulletSpeed,
-        this.getDamage(),
-        this.bulletSpriteId
-      );
-      playerBullets.push(bullet);
-    }
-  }
-  takeDamage(amount) {
-    if (!this.isAlive) return;
-    this.hp -= amount;
-    if (this.hp <= 0) {
-      this.hp = 0;
-      this.isAlive = false;
-      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
-      // 播放玩家爆炸
-      fxOneShots.push(new OneShotFx(
-        this.x,
-        this.y,
-        GameManifest.entities.fx.playerExplosion.assetId,
-        GameManifest.entities.fx.playerExplosion.logicSize,
-        1.0
-      ));
-      onPlayerDead();
-    }
-  }
-  heal(amount) {
-    this.hp = clamp(this.hp + amount, 0, this.maxHP);
-  }
-  healFull() {
-    this.hp = this.maxHP;
-  }
-  upgradeAttackLevel(targetLevel) {
-    const prev = this.attackLevel;
-    targetLevel = clamp(targetLevel, 1, 4);
-    if (targetLevel <= prev) return;
-    this.attackLevel = targetLevel;
-    const cfg = GameManifest.entities.player.attackLevels[targetLevel];
-    this.bodySpriteId = cfg.bodyAssetId;
-    this.bulletSpriteId = cfg.bulletAssetId;
-
-    // 特效播放：player_upgrade_flash 动画跟随玩家移动
-    const flashAsset = GameManifest.assets.player_upgrade_flash;
-    const duration = (flashAsset.frameCount / flashAsset.fps) || 0.8;
-    fxOneShots.push(new OneShotFx(
-      this.x,
-      this.y,
-      "player_upgrade_flash",
-      flashAsset.logicSize,
-      duration,
-      null,
-      this  // 传入玩家对象作为跟随目标，使动画跟随玩家移动
-    ));
-  }
-  drawLightningEffect(ctx) {
-    // 攻击等级4时，旋转速度变为现在的 2/3 (0.005 -> 0.00333)
-    const time = performance.now() * 0.00333;
+  function renderLoading(){
+    backCtx.fillStyle='#0b0f12';
+    backCtx.fillRect(0,0,vw,vh);
     ctx.save();
-    ctx.strokeStyle = "#4deeff";
-    ctx.lineWidth = 3;
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = "#00ffff";
-    
-    for (let i = 0; i < 5; i++) {
-      ctx.beginPath();
-      let angle = (i / 5) * Math.PI * 2 + time;
-      let r = 85 + Math.sin(time * 3 + i) * 15;
-      let px = this.x + Math.cos(angle) * r;
-      let py = this.y + Math.sin(angle) * r;
-      ctx.moveTo(px, py);
-      
-      for (let j = 0; j < 4; j++) {
-        px += (Math.random() - 0.5) * 40;
-        py += (Math.random() - 0.5) * 40;
-        ctx.lineTo(px, py);
+    ctx.setTransform(scale,0,0,scale,0,0);
+    ctx.fillStyle='rgba(0,0,0,0.45)';
+    ctx.fillRect(0,0,vw,vh);
+    const p = loadingState.total>0 ? loadingState.done/loadingState.total : 0;
+    const bw=280, bh=16, bx=(vw-bw)/2, by=vh/2+20;
+    ctx.fillStyle='#fff';
+    ctx.fillText('Loading assets...', vw/2-62, vh/2-8);
+    rect(bx,by,bw,bh,'#2a2a2a');
+    rect(bx,by,bw*clamp(p,0,1),bh,'#49f38f');
+    ctx.fillStyle='#d6ffe6';
+    ctx.fillText(`${Math.floor(clamp(p,0,1)*100)}%`, vw/2-10, by+30);
+    ctx.restore();
+  }
+  window.addEventListener('resize',resize); resize();
+
+  const world={w:2400,h:2400};
+  const keys={};
+  const isTouchDevice = (navigator.maxTouchPoints||0) > 0;
+  const touchMove = { active:false, id:null, startX:0, startY:0, dirX:0, dirY:0, maxR:64 };
+  function resetTouchMove(){ touchMove.active=false; touchMove.id=null; touchMove.dirX=0; touchMove.dirY=0; }
+  function updateTouchMoveFromEvent(ev){
+    if(!touchMove.active) return;
+    const t=[...ev.changedTouches].find(tt=>tt.identifier===touchMove.id) || [...ev.touches].find(tt=>tt.identifier===touchMove.id);
+    if(!t) return;
+    const r=frontCanvas.getBoundingClientRect();
+    const x=(t.clientX-r.left)/scale, y=(t.clientY-r.top)/scale;
+    const dx=x-touchMove.startX, dy=y-touchMove.startY;
+    const len=Math.hypot(dx,dy);
+    if(len<=1e-6){ touchMove.dirX=0; touchMove.dirY=0; return; }
+    const cap=Math.min(1,len/touchMove.maxR);
+    touchMove.dirX=(dx/len)*cap;
+    touchMove.dirY=(dy/len)*cap;
+  }
+  window.addEventListener('keydown',e=>{
+    const k=e.key.toLowerCase();
+    keys[k]=true;
+    if(k==='h') state.showCollBox = !state.showCollBox;
+    if(k==='c') state.showCenterDebug = !state.showCenterDebug; // CENTER_LOCK_FIX_V3
+    if(state.paused&&['1','2','3'].includes(e.key)) chooseUpgrade(+e.key-1);
+    if(state.dead&&k==='r') restart();
+  });
+  window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+  frontCanvas.addEventListener('touchstart', (e)=>{
+    if(state.paused||state.dead) return;
+    if(touchMove.active) return;
+    const t=e.changedTouches[0];
+    const r=frontCanvas.getBoundingClientRect();
+    const x=(t.clientX-r.left)/scale, y=(t.clientY-r.top)/scale;
+    if(x>vw*0.55) return; // left side joystick
+    touchMove.active=true; touchMove.id=t.identifier; touchMove.startX=x; touchMove.startY=y; touchMove.dirX=0; touchMove.dirY=0;
+    e.preventDefault();
+  }, {passive:false});
+  frontCanvas.addEventListener('touchmove', (e)=>{
+    updateTouchMoveFromEvent(e);
+    if(touchMove.active) e.preventDefault();
+  }, {passive:false});
+  frontCanvas.addEventListener('touchend', (e)=>{
+    const ended=[...e.changedTouches].some(t=>t.identifier===touchMove.id);
+    if(ended) resetTouchMove();
+  }, {passive:true});
+  frontCanvas.addEventListener('touchcancel', ()=>resetTouchMove(), {passive:true});
+  frontCanvas.addEventListener('click', (e)=>{ if(!state.paused) return; const r=frontCanvas.getBoundingClientRect(); const x=(e.clientX-r.left)/scale, y=(e.clientY-r.top)/scale; for(let i=0;i<state.cards.length;i++){const c=state.cards[i]; if(x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h) chooseUpgrade(i);} if(state.dead){const b=state.restartBtn; if(x>=b.x&&b.x+b.w&&y>=b.y&&y<=b.y+b.h) restart();}});
+
+  // 透明图/动图碰撞体积：仅非透明部分。从图像提取不透明像素的边界框。
+  const opaqueBoundsCache = { player: null, arcaneOrb: null, slash: null, dash: null };
+  function getOpaqueBounds(source, alphaThreshold){
+    const w = source.width || source.naturalWidth || 0;
+    const h = source.height || source.naturalHeight || 0;
+    if(!w||!h) return null;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const cx = c.getContext('2d');
+    cx.drawImage(source, 0, 0);
+    const data = cx.getImageData(0, 0, w, h).data;
+    const th = alphaThreshold != null ? alphaThreshold : 16;
+    let left = w, top = h, right = 0, bottom = 0;
+    for(let y = 0; y < h; y++)
+      for(let x = 0; x < w; x++){
+        if(data[(y*w+x)*4+3] >= th){
+          if(x < left) left = x;
+          if(x > right) right = x;
+          if(y < top) top = y;
+          if(y > bottom) bottom = y;
+        }
       }
+    if(left > right || top > bottom) return null;
+    return { left, top, right: right+1, bottom: bottom+1, iw: w, ih: h };
+  }
+  function worldBoxFromOpaqueBounds(ob, entityX, entityY, entityW, entityH){
+    if(!ob) return null;
+    const sx = entityW / ob.iw, sy = entityH / ob.ih;
+    return {
+      x: entityX - entityW/2 + ob.left * sx,
+      y: entityY - entityH/2 + ob.top * sy,
+      w: (ob.right - ob.left) * sx,
+      h: (ob.bottom - ob.top) * sy
+    };
+  }
+  const HITBOX_SCALE = 0.72;
+  const HITBOX_SCALE_FLYING = 0.58 * 0.25;
+  function hbBottomThird(e){
+    if(e.isPlayer && opaqueBoundsCache.player){
+      const box = worldBoxFromOpaqueBounds(opaqueBoundsCache.player, e.x, e.y, e.w, e.h);
+      if(box) return box;
+    }
+    const w = e.flying ? e.w * HITBOX_SCALE_FLYING : e.w * HITBOX_SCALE;
+    const h = e.flying ? e.h * HITBOX_SCALE_FLYING : e.h * HITBOX_SCALE;
+    if(!e.flying){
+      const nw = w/2, nh = h/2, bottom = e.y + h/2;
+      return {x:e.x-nw/2, y:bottom-nh, w:nw, h:nh};
+    }
+    return {x:e.x-w/2,y:e.y-h/2,w,h};
+  }
+  function overlap(a,b){ return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y; }
+  function spawnHeavyExplosion(e){
+    const b=heavyAttackBox(e,state.player);
+    const cells=[];
+    const cellSize=8;
+    const cols=Math.max(2,Math.floor(b.w/cellSize));
+    const rows=Math.max(2,Math.floor(b.h/cellSize));
+    for(let gy=0;gy<rows;gy++){
+      for(let gx=0;gx<cols;gx++){
+        const px=b.x+gx*cellSize;
+        const py=b.y+gy*cellSize;
+        const seed=Math.random()*1000;
+        const threshold=0.42 + (gy/rows)*0.25;
+        if(Math.random()<threshold){
+          cells.push({x:px,y:py,s:cellSize,seed});
+        }
+      }
+    }
+    return {box:b,cells,t:HEAVY_ATTACK_DUR,life:HEAVY_ATTACK_DUR};
+  }
+  function drawEnemyAttackZone(e, p, ox, oy){
+    ctx.save();
+    ctx.strokeStyle='rgba(255,100,80,0.7)';
+    ctx.lineWidth=2;
+    ctx.setLineDash([4,4]);
+    if(e.heavy){
+      const b=heavyAttackBox(e,p);
+      ctx.strokeRect(b.x+ox,b.y+oy,b.w,b.h);
+    }else{
+      const b=meleeAttackBox(e);
+      ctx.strokeRect(b.x+ox,b.y+oy,b.w,b.h);
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+  function drawFlyingClawFx(cf, ox, oy){
+    for(const pt of (cf.particles||[])){
+      const lifeLeft=1-Math.min(1,pt.age/(pt.life||0.3));
+      if(lifeLeft<=0) continue;
+      const r=pt.r||200, g=20, b=30;
+      ctx.fillStyle=`rgba(${r},${g},${b},${lifeLeft*0.9})`;
+      const s=Math.max(1,Math.round(pt.size*lifeLeft));
+      ctx.fillRect(Math.floor(pt.x+ox)-s/2,Math.floor(pt.y+oy)-s/2,s,s);
+    }
+  }
+  function drawSpikeKnockFx(sf, ox, oy){
+    for(const pt of (sf.particles||[])){
+      const lifeLeft=1-Math.min(1,pt.age/(pt.life||0.3));
+      if(lifeLeft<=0) continue;
+      const s=Math.max(2,Math.round(pt.size*lifeLeft));
+      const col = pt.col || [140,255,170];
+      const core = pt.core || [255,240,120];
+      const x=Math.floor(pt.x+ox)-s/2;
+      const y=Math.floor(pt.y+oy)-s/2;
+      ctx.fillStyle=`rgba(${col[0]},${col[1]},${col[2]},${0.95*lifeLeft})`;
+      ctx.fillRect(x,y,s,s);
+      const coreS=Math.max(1,Math.floor(s*0.58));
+      ctx.fillStyle=`rgba(${core[0]},${core[1]},${core[2]},${0.98*lifeLeft})`;
+      ctx.fillRect(x+Math.floor((s-coreS)/2),y+Math.floor((s-coreS)/2),coreS,coreS);
+    }
+  }
+  function drawBlockFx(bf, ox, oy){
+    const p=clamp((bf.t||0)/(bf.life||0.45),0,1);
+    if(bf.cx!=null&&bf.cy!=null){
+      ctx.strokeStyle=`rgba(255,220,120,${0.95*p})`;
+      ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.arc(bf.cx+ox,bf.cy+oy,42*(1-p*0.2),0,Math.PI*2);
       ctx.stroke();
     }
-    ctx.restore();
-  }
-  draw(ctx) {
-    if (!this.isAlive) return;
-
-    // 攻击等级 4 添加环绕蓝色闪电
-    if (this.attackLevel === 4) {
-      this.drawLightningEffect(ctx);
+    for(const pt of (bf.particles||[])){
+      const left=1-Math.min(1,pt.age/(pt.life||0.35));
+      if(left<=0) continue;
+      const s=Math.max(1,Math.round((pt.size||2)*left));
+      const x=Math.floor(pt.x+ox)-s/2, y=Math.floor(pt.y+oy)-s/2;
+      ctx.fillStyle=`rgba(255,230,120,${0.95*left})`;
+      ctx.fillRect(x,y,s,s);
     }
-
-    // 优先同步 GIF 渲染，若非 GIF 则走 Canvas 逻辑
-    if (!syncEntityGif(this, this.bodySpriteId)) {
-      getSprite(this.bodySpriteId).draw(ctx, this.x, this.y);
-    }
-
-    // HP 条
-    const ratio = this.hp / this.maxHP;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(this.x - 26, this.y + this.height / 2 + 10, 52, 6);
-    ctx.fillStyle = '#0f0';
-    ctx.fillRect(this.x - 25, this.y + this.height / 2 + 11, 50 * ratio, 4);
   }
-}
-
-// 玩家子弹（始终朝上，机头朝上）
-class PlayerBullet {
-  constructor(x, y, w, h, vy, damage, bulletSpriteId) {
-    this.x = x;
-    this.y = y;
-    this.width = w;
-    this.height = h;
-    this.vy = vy;
-    this.damage = damage;
-    this.alive = true;
-    this.spriteId = bulletSpriteId;
-  }
-  update(dt) {
-    this.y += this.vy * dt;
-    if (this.y + this.height / 2 < 0) this.alive = false;
-  }
-  draw(ctx) {
+  function drawXpDrop(d, ox, oy){
+    const x=d.x+ox, y=d.y+oy, r=d.r||4;
     ctx.save();
-    
-    // 跳动效果：整体位置微小的随机偏移
-    const jumpX = (Math.random() - 0.5) * 6;
-    const jumpY = (Math.random() - 0.5) * 4;
-    
-    const centerX = this.x + jumpX;
-    const centerY = this.y + jumpY;
-    const halfW = this.width / 2;
-    const halfH = this.height / 2;
-
-    // 1. 设置外发光 (金黄色闪电感)
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = "#FFD700";
-    
-    // 2. 绘制主体：梭形竖长条 (两头尖)
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY - halfH); // 顶部尖端
-    
-    // 稍微带一点不规则抖动的边缘
-    const jitter = (Math.random() - 0.5) * 2;
-    ctx.lineTo(centerX + halfW + jitter, centerY); 
-    ctx.lineTo(centerX, centerY + halfH); // 底部尖端
-    ctx.lineTo(centerX - halfW - jitter, centerY);
-    
-    ctx.closePath();
-    
-    // 填充亮黄色梯度
-    const gradient = ctx.createLinearGradient(centerX, centerY - halfH, centerX, centerY + halfH);
-    gradient.addColorStop(0, "#FFFF00");
-    gradient.addColorStop(0.5, "#FFFACD"); // 柠檬绸色，内部核心更亮
-    gradient.addColorStop(1, "#FFFF00");
-    
-    ctx.fillStyle = gradient;
-    ctx.fill();
-    
-    // 3. 描边增强闪电锐利感
-    ctx.strokeStyle = "#FFD700";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    // 4. 内部高亮核心 (白色极细条，模拟闪电核心)
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY - halfH * 0.8);
-    ctx.lineTo(centerX, centerY + halfH * 0.8);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    
+    ctx.fillStyle='rgba(240,188,68,0.96)';
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(255,236,155,0.98)';
+    ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(x,y,Math.max(1,r-1),0,Math.PI*2); ctx.stroke();
     ctx.restore();
   }
-}
+  function drawXpFlyFx(fx, ox, oy){
+    const p=1-Math.min(1,fx.age/(fx.life||0.25));
+    if(p<=0) return;
+    const s=Math.max(1,Math.round((fx.size||3)*p));
+    const x=Math.floor(fx.x+ox)-s/2, y=Math.floor(fx.y+oy)-s/2;
+    ctx.fillStyle=`rgba(255,214,112,${0.9*p})`;
+    ctx.fillRect(x,y,s,s);
+  }
+  function enemyInMeleeAttackZone(e,p){
+    if(e.heavy) return heavyPlayerInRange(e,p);
+    const faceRight=p.x>e.x;
+    const dx=faceRight?1:-1;
+    const proj=(p.x-e.x)*dx;
+    const perp=Math.abs(p.y-e.y);
+    const ph=hbBottomThird(p);
+    return proj>=-e.w/2-ph.w/2&&proj<=e.w/2+e.w+ph.w/2&&perp<=e.h/2+ph.h/2;
+  }
+  function meleeAttackBox(e){ return {x:e.x-e.w/2,y:e.y-e.h/2,w:e.w,h:e.h}; }
+  function heavyAttackBox(e,p){
+    const faceRight=p.x>e.x;
+    const x=faceRight ? e.x-e.w/2 : e.x-e.w/2-e.w;
+    return {x,y:e.y-e.h/2,w:e.w*2,h:e.h};
+  }
+  function meleePlayerInRange(e,p){ return overlap(hbBottomThird(p),meleeAttackBox(e)); }
+  function heavyPlayerInRange(e,p){ return overlap(hbBottomThird(p),heavyAttackBox(e,p)); }
+  function spawnFlyingClawFx(cx, cy){
+    const particles=[];
+    const n=80+Math.floor(Math.random()*40);
+    for(let i=0;i<n;i++){
+      const angle=Math.random()*Math.PI*2;
+      const sp=100+Math.random()*150;
+      const life=0.2+Math.random()*0.25;
+      particles.push({
+        x:cx,y:cy,vx:Math.cos(angle)*sp,vy:Math.sin(angle)*sp-40,
+        life,age:0,size:0.8+Math.random()*1.5,r:200+Math.floor(Math.random()*55)
+      });
+    }
+    return {cx,cy,particles,t:0.45};
+  }
+  function spawnSpikeKnockFx(kind, cx, cy){
+    const cfg = kind==='dash'
+      ? {base:62,spdMin:150,spdMax:340,sizeMin:4,sizeMax:9,col:[255,128,70],core:[255,240,120]}
+      : kind==='arcane'
+      ? {base:54,spdMin:140,spdMax:310,sizeMin:4,sizeMax:8,col:[255,110,55],core:[255,235,105]}
+      : {base:50,spdMin:130,spdMax:290,sizeMin:4,sizeMax:8,col:[255,95,45],core:[255,230,90]};
+    const particles=[];
+    const n=cfg.base+Math.floor(Math.random()*10);
+    for(let i=0;i<n;i++){
+      const a=Math.random()*Math.PI*2;
+      const sp=cfg.spdMin+Math.random()*(cfg.spdMax-cfg.spdMin);
+      particles.push({
+        x:cx,y:cy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-90,
+        life:0.24+Math.random()*0.26,age:0,size:cfg.sizeMin+Math.random()*(cfg.sizeMax-cfg.sizeMin),col:cfg.col,core:cfg.core
+      });
+    }
+    return {particles,t:0.42};
+  }
+  function getArcaneOrbHitbox(pr){
+    const playerSize = MANIFEST.assets.Victor.logicSize.width;
+    const orbScale = playerSize / 6 * 4;
+    const imgW = 16 * (orbScale / 32), imgH = orbScale;
+    if(opaqueBoundsCache.arcaneOrb){
+      const box = worldBoxFromOpaqueBounds(opaqueBoundsCache.arcaneOrb, pr.x, pr.y, imgW, imgH);
+      if(box) return box;
+    }
+    return { x: pr.x - imgW/2, y: pr.y - imgH/2, w: imgW, h: imgH };
+  }
+  function localOpaqueRect(ob, renderW, renderH){
+    if(!ob) return {x:-renderW/2,y:-renderH/2,w:renderW,h:renderH};
+    const sx=renderW/ob.iw, sy=renderH/ob.ih;
+    return {x:-renderW/2+ob.left*sx, y:-renderH/2+ob.top*sy, w:(ob.right-ob.left)*sx, h:(ob.bottom-ob.top)*sy};
+  }
+  function rotatedRectAABB(cx, cy, rect, angle){
+    const c=Math.cos(angle), s=Math.sin(angle);
+    const pts=[
+      {x:rect.x,y:rect.y},{x:rect.x+rect.w,y:rect.y},
+      {x:rect.x+rect.w,y:rect.y+rect.h},{x:rect.x,y:rect.y+rect.h}
+    ];
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    for(const p of pts){
+      const rx=cx + p.x*c - p.y*s;
+      const ry=cy + p.x*s + p.y*c;
+      if(rx<minX) minX=rx; if(ry<minY) minY=ry; if(rx>maxX) maxX=rx; if(ry>maxY) maxY=ry;
+    }
+    return {x:minX,y:minY,w:maxX-minX,h:maxY-minY};
+  }
+  function getSlashPose(s, p){
+    const c=getPlayerCenter(p);
+    const life=Math.max(0.0001, s.life || SLASH_AXE_CFG.duration);
+    const spinProgress=(life-s.t)/life;
+    const spinDir=s.spinDir||1;
+    const start=s.startAngle||0;
+    const angle=start+spinDir*(Math.PI*2)*spinProgress;
+    const radius=s.radius||SLASH_AXE_CFG.radius;
+    const ax=c.cx+Math.cos(angle)*radius;
+    const ay=c.cy+Math.sin(angle)*radius;
+    const tangent=angle+spinDir*Math.PI*0.5;
+    return {ax,ay,tangent};
+  }
+  function getSlashHitbox(s, p){
+    const pose=getSlashPose(s,p);
+    const rect=localOpaqueRect(opaqueBoundsCache.slash, SLASH_SPRITE_W, SLASH_SPRITE_H);
+    return rotatedRectAABB(pose.ax, pose.ay, rect, pose.tangent);
+  }
+  function getDashStampHitboxes(d){
+    const life=d.life||0.5, maxLen=d.maxLen||360;
+    const progress=1-(d.t/Math.max(0.001,life));
+    const currLen=progress*maxLen;
+    const timeElapsed=progress*life;
+    const gap=maxLen*DASH_SPRITE_INTERVAL/life;
+    const count=Math.max(1,Math.floor(currLen/gap));
+    const rects=[];
+    for(let i=0;i<count;i++){
+      const age=timeElapsed-i*DASH_SPRITE_INTERVAL;
+      if(age<0) continue;
+      const phase=Math.min(1,age/DASH_SPRITE_CYCLE);
+      let scale=1;
+      if(phase<0.33) scale=phase/0.33;
+      else if(phase>0.66) scale=1-((phase-0.66)/0.34)*0.3;
+      if(scale<=0) continue;
+      const dist=(i+0.5)*gap;
+      const px=d.startX+d.dirX*dist, py=d.startY+d.dirY*dist;
+      const base=d.spriteSize||DASH_SPRITE_SZ, sz=base*scale;
+      const r=localOpaqueRect(opaqueBoundsCache.dash, sz, sz);
+      rects.push({x:px+r.x,y:py+r.y,w:r.w,h:r.h});
+    }
+    return rects;
+  }
+  function triggerBlockFx(p){
+    const particles=[];
+    for(let i=0;i<40;i++){
+      const a=(Math.PI*2*i)/40;
+      const sp=90+Math.random()*130;
+      particles.push({x:p.x,y:p.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,age:0,life:0.25+Math.random()*0.2,size:2+Math.random()*2});
+    }
+    (state.blockFx=state.blockFx||[]).push({particles,cx:p.x,cy:p.y,t:0.45,life:0.45});
+  }
+  function tryBlockDamage(p){
+    const lv=Math.max(0,p.blockLv||0);
+    if(lv<=0) return false;
+    const chance=clamp(0.06 + lv*0.022, 0, 0.52);
+    if(Math.random()<chance){ triggerBlockFx(p); return true; }
+    return false;
+  }
+  function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+  function dist(ax,ay,bx,by){ const dx=bx-ax,dy=by-ay; return Math.hypot(dx,dy); }
+  function getPlayerCenter(player){ // CENTER_LOCK_FIX_V3
+    return { cx: player.x, cy: player.y }; // 由像素块矩形(x-w/2,y-h/2,w,h)推得中心
+  }
 
-// 敌机（低级 / 中级）
-class Enemy {
-  constructor(type, x, y) {
-    this.type = type; // "low" / "mid"
-    const entCfg = GameManifest.entities.enemies[type];
-    this.width = entCfg.logicSize.width;
-    this.height = entCfg.logicSize.height;
-    this.x = x;
-    this.y = y;
-    this.vx = 0;
-    this.vy = 0;
-    this.hp = entCfg.hp;
-    this.alive = true;
-    this.shootCooldown = 0;
-    this.bodySpriteId = entCfg.bodyAssetId;
-    this.bulletSpriteId = entCfg.bulletAssetId;
-    this.gifEl = null;
-    this.currentGifAssetId = null;
+  // COLLISION_FREEZE_FIX_START
+  const COLLISION_SAFE = {
+    EPS: 1e-6,
+    DT_MIN: 0,
+    DT_MAX: 0.05,
+    MAX_SPEED: 900,
+    MAX_FRAME_DISP: 120,
+    CONTACT_CACHE_LIMIT: 4096,
+    CONTACT_TTL_MS: 1200,
+    WATCHDOG_BUDGET_MS: 8
+  };
+  const collDiag = { enabled:true, nanGuard:0, clampCount:0, skippedHeavy:0, watchdogTrips:0 };
+  const contactCache = new Map();
 
-    if (type === "low") {
-      this.vy = phys.enemySpeedLow; // 独立于背景速度
-    } else if (type === "mid") {
-      this.vy = phys.enemySpeedMidVertical; // 独立于背景速度
-      this.vx = (Math.random() < 0.5 ? -1 : 1) * phys.enemySpeedMidHorizontal;
+  function safeFinite(v, fallback=0){
+    if(Number.isFinite(v)) return v;
+    collDiag.nanGuard++;
+    return fallback;
+  }
+  function safeClampSpeed(e){
+    e.vx = safeFinite(e.vx,0);
+    e.vy = safeFinite(e.vy,0);
+    const sp = Math.hypot(e.vx,e.vy);
+    if(sp>COLLISION_SAFE.MAX_SPEED){
+      const k = COLLISION_SAFE.MAX_SPEED/Math.max(COLLISION_SAFE.EPS,sp);
+      e.vx*=k; e.vy*=k; collDiag.clampCount++;
     }
   }
-  update(dt) {
-    // 运动
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
+  function safeClampFrameDisp(e, dt){
+    const maxD = COLLISION_SAFE.MAX_FRAME_DISP;
+    const dx = safeFinite(e.vx*dt,0), dy = safeFinite(e.vy*dt,0);
+    const d = Math.hypot(dx,dy);
+    if(d>maxD){
+      const k = maxD/Math.max(COLLISION_SAFE.EPS,d);
+      e.vx *= k; e.vy *= k; collDiag.clampCount++;
+    }
+  }
+  function touchKey(a,b){ return a<b ? `${a}|${b}` : `${b}|${a}`; }
+  function cleanupContactCache(nowMs){
+    if(contactCache.size > COLLISION_SAFE.CONTACT_CACHE_LIMIT){
+      let rm = contactCache.size - COLLISION_SAFE.CONTACT_CACHE_LIMIT;
+      for(const k of contactCache.keys()){ contactCache.delete(k); if(--rm<=0) break; }
+      collDiag.clampCount++;
+    }
+    for(const [k,t] of contactCache){
+      if(nowMs - t > COLLISION_SAFE.CONTACT_TTL_MS) contactCache.delete(k);
+    }
+  }
+  // COLLISION_FREEZE_FIX_END
 
-    // 边界碰撞修正与速度清空/反弹（防穿出）
-    const halfW = this.width / 2;
-    const halfH = this.height / 2;
-    if (this.type === "mid") {
-      if (this.x - halfW < 0) {
-        this.x = halfW;
-        this.vx = Math.abs(this.vx); // 反弹
-      } else if (this.x + halfW > GAME_WIDTH) {
-        this.x = GAME_WIDTH - halfW;
-        this.vx = -Math.abs(this.vx);
+  const COLLISION_CFG = {
+    ELASTIC_ON: true,
+    EPS: 1e-4,
+    MAX_CORRECT: 12,
+    PUSH_ITER: 3,
+    POSITION_BIAS: 0.85,
+    PLAYER_MASS: 2.0,
+    ENEMY_MASS_MELEE: 1.0,
+    ENEMY_MASS_RANGED: 0.95,
+    RESTITUTION: 0.24,
+    DAMPING: 0.90,
+    TANGENT_FRICTION: 0.12,
+    PLAYER_INPUT_KEEP: 0.42,
+    STUCK_FRAMES: 14,
+    STUCK_JITTER: 10,
+    PLAYER_PASS: true,
+    PE_NUDGE: 0.12,
+    PE_PUSH: 0.72,
+    PE_SLOP: 0.8,
+    PE_MAX_ITERS: 4,
+    PE_PUSH_MAX: 7.5,
+    PE_BOUNCE: 0.16,
+    PE_PUSH_SPEED: 34,
+    SIDE_NUDGE_ON: true,
+    SIDE_NUDGE_COOLDOWN_MS: 160,
+    SIDE_NUDGE_SPEED: 38,
+    SIDE_NUDGE_TANGENT_RATIO: 0.35
+  };
+
+  const SLASH_AXE_CFG = {
+    duration: 2.5,       // hitbox active duration, also 1 full 360° in this time
+    radius: 96,          // pull slash orbit closer to player
+    trailFrames: 3,
+    spinDir: 1
+  };
+
+  function getMass(e){
+    if(e && e.isPlayer) return COLLISION_CFG.PLAYER_MASS;
+    return e && e.ranged ? COLLISION_CFG.ENEMY_MASS_RANGED : COLLISION_CFG.ENEMY_MASS_MELEE;
+  }
+
+  function getCollisionBox(e){
+    if(e.isPlayer && opaqueBoundsCache.player){
+      const box = worldBoxFromOpaqueBounds(opaqueBoundsCache.player, e.x, e.y, e.w, e.h);
+      if(box) return box;
+    }
+    const cw = e.flying ? e.w * HITBOX_SCALE_FLYING : e.w * HITBOX_SCALE;
+    const ch = e.flying ? e.h * HITBOX_SCALE_FLYING : e.h * HITBOX_SCALE;
+    if(!e.flying){
+      const nw = cw/2, nh = ch/2, bottom = e.y + ch/2;
+      return { x:e.x-nw/2, y:bottom-nh, w:nw, h:nh };
+    }
+    return { x:e.x-cw/2, y:e.y-ch/2, w:cw, h:ch };
+  }
+  function overlapsAABB(a,b){ return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y; }
+
+  function computeOverlapAndNormal(aBox,bBox){
+    const ax=aBox.x+aBox.w*0.5, ay=aBox.y+aBox.h*0.5;
+    const bx=bBox.x+bBox.w*0.5, by=bBox.y+bBox.h*0.5;
+    let dx=bx-ax, dy=by-ay;
+    if(Math.abs(dx)<COLLISION_CFG.EPS && Math.abs(dy)<COLLISION_CFG.EPS){
+      dx = COLLISION_CFG.EPS;
+      dy = 0;
+    }
+    const overlapX = (aBox.w*0.5 + bBox.w*0.5) - Math.abs(dx);
+    const overlapY = (aBox.h*0.5 + bBox.h*0.5) - Math.abs(dy);
+    if(overlapX<=0 || overlapY<=0) return null;
+    if(overlapX<overlapY){
+      const nx = dx>=0 ? 1 : -1;
+      return { nx, ny:0, penetration:Math.min(overlapX, COLLISION_CFG.MAX_CORRECT), overlapX, overlapY };
+    }
+    const ny = dy>=0 ? 1 : -1;
+    return { nx:0, ny, penetration:Math.min(overlapY, COLLISION_CFG.MAX_CORRECT), overlapX, overlapY };
+  }
+
+  function resolvePairElastic(a,b){
+    const ab=getCollisionBox(a), bb=getCollisionBox(b);
+    if(!overlapsAABB(ab,bb)) return false;
+    const info=computeOverlapAndNormal(ab,bb);
+    if(!info) return false;
+
+    const ma=getMass(a), mb=getMass(b);
+    const invA=1/Math.max(COLLISION_CFG.EPS,ma), invB=1/Math.max(COLLISION_CFG.EPS,mb);
+    const invSum=invA+invB;
+
+    const corr = info.penetration * COLLISION_CFG.POSITION_BIAS;
+    const moveA=corr*(invA/invSum);
+    const moveB=corr*(invB/invSum);
+
+    a.x -= info.nx*moveA; a.y -= info.ny*moveA;
+    b.x += info.nx*moveB; b.y += info.ny*moveB;
+
+    if(COLLISION_CFG.ELASTIC_ON){
+      const rvx=b.vx-a.vx, rvy=b.vy-a.vy;
+      const vn=rvx*info.nx + rvy*info.ny;
+      if(vn<0){
+        const e = COLLISION_CFG.RESTITUTION;
+        const j = -((1+e)*vn) / invSum;
+        const ix=j*info.nx, iy=j*info.ny;
+        a.vx -= ix*invA; a.vy -= iy*invA;
+        b.vx += ix*invB; b.vy += iy*invB;
+
+        const tvx = rvx - vn*info.nx;
+        const tvy = rvy - vn*info.ny;
+        const tLen = Math.hypot(tvx,tvy);
+        if(tLen>COLLISION_CFG.EPS){
+          const tx=tvx/tLen, ty=tvy/tLen;
+          const jt = -COLLISION_CFG.TANGENT_FRICTION * vn / invSum;
+          const fix = jt*tx, fiy = jt*ty;
+          a.vx -= fix*invA; a.vy -= fiy*invA;
+          b.vx += fix*invB; b.vy += fiy*invB;
+        }
       }
-    } else {
-      if (this.x - halfW < 0) {
-        this.x = halfW;
-        this.vx = 0;
-      } else if (this.x + halfW > GAME_WIDTH) {
-        this.x = GAME_WIDTH - halfW;
-        this.vx = 0;
+    }
+
+    a.vx*=COLLISION_CFG.DAMPING; a.vy*=COLLISION_CFG.DAMPING;
+    b.vx*=COLLISION_CFG.DAMPING; b.vy*=COLLISION_CFG.DAMPING;
+
+    return true;
+  }
+
+  function resolvePlayerEnemyPass(player,enemies,inputVX,inputVY){
+    let touched=false;
+    const inLen=Math.hypot(inputVX,inputVY);
+    let dirX=0, dirY=0;
+    if(inLen>COLLISION_CFG.EPS){ dirX=inputVX/inLen; dirY=inputVY/inLen; }
+    const nowMs = performance.now();
+    cleanupContactCache(nowMs);
+    for(let iter=0; iter<COLLISION_CFG.PE_MAX_ITERS; iter++){
+      let any=false;
+      for(let ei=0; ei<enemies.length; ei++){
+        const e = enemies[ei];
+        const pb=getCollisionBox(player), eb=getCollisionBox(e);
+        const isOverlap = overlapsAABB(pb,eb);
+        if(!isOverlap){
+          e._peTouching = false;
+          continue;
+        }
+        const info=computeOverlapAndNormal(pb,eb);
+        if(!info){
+          e._peTouching = false;
+          continue;
+        }
+        any=true; touched=true;
+
+        const ck = touchKey(-1, ei);
+        const lastNudge = contactCache.get(ck) || 0;
+        const canNudge = (nowMs - lastNudge) >= COLLISION_CFG.SIDE_NUDGE_COOLDOWN_MS;
+        if(COLLISION_CFG.SIDE_NUDGE_ON && canNudge){
+          const nx = info.nx;
+          const ny = info.ny;
+          let tx = -ny, ty = nx;
+          if(inLen>COLLISION_CFG.EPS){
+            const tdot = tx*dirX + ty*dirY;
+            if(tdot<0){ tx=-tx; ty=-ty; }
+          } else {
+            if(Math.random()<0.5){ tx=-tx; ty=-ty; }
+          }
+          const impulse = COLLISION_CFG.SIDE_NUDGE_SPEED;
+          const tangent = impulse * COLLISION_CFG.SIDE_NUDGE_TANGENT_RATIO;
+          e.vx += nx*impulse + tx*tangent;
+          e.vy += ny*impulse + ty*tangent;
+          contactCache.set(ck, nowMs);
+        }
+        e._peTouching = true;
+
+        const sep=Math.max(0, info.penetration-COLLISION_CFG.PE_SLOP);
+        if(sep<=0) continue;
+        const push=Math.min(COLLISION_CFG.PE_PUSH_MAX, sep*COLLISION_CFG.PE_PUSH);
+        const nudge=push*COLLISION_CFG.PE_NUDGE;
+
+        e.x += info.nx*push;
+        e.y += info.ny*push;
+        player.x -= info.nx*nudge;
+        player.y -= info.ny*nudge;
+
+        if(COLLISION_CFG.ELASTIC_ON){
+          const rvx=e.vx-player.vx, rvy=e.vy-player.vy;
+          const vn=rvx*info.nx + rvy*info.ny;
+          if(vn<0){
+            const j = -(1+COLLISION_CFG.PE_BOUNCE)*vn;
+            e.vx += info.nx * Math.min(COLLISION_SAFE.MAX_FRAME_DISP, j*COLLISION_CFG.PE_PUSH*0.5);
+            e.vy += info.ny * Math.min(COLLISION_SAFE.MAX_FRAME_DISP, j*COLLISION_CFG.PE_PUSH*0.5);
+            player.vx -= info.nx * j*COLLISION_CFG.PE_NUDGE*0.08;
+            player.vy -= info.ny * j*COLLISION_CFG.PE_NUDGE*0.08;
+          }
+        }
+
+        if(inLen>COLLISION_CFG.EPS){
+          const pvn = player.vx*info.nx + player.vy*info.ny;
+          const dotInN = dirX*info.nx + dirY*info.ny;
+          if(dotInN>0 && pvn<0) {
+            player.vx -= info.nx*pvn;
+            player.vy -= info.ny*pvn;
+          }
+        }
+
+      }
+      if(!any) break;
+    }
+    if(touched){
+      const minVX=Math.abs(inputVX)*COLLISION_CFG.PLAYER_INPUT_KEEP;
+      const minVY=Math.abs(inputVY)*COLLISION_CFG.PLAYER_INPUT_KEEP;
+      if(Math.abs(inputVX)>COLLISION_CFG.EPS && Math.abs(player.vx)<minVX) player.vx = Math.sign(inputVX)*minVX;
+      if(Math.abs(inputVY)>COLLISION_CFG.EPS && Math.abs(player.vy)<minVY) player.vy = Math.sign(inputVY)*minVY;
+    }
+  }
+
+  function resolvePlayerEnemyPush(player,enemies,inputVX,inputVY){
+    if(COLLISION_CFG.PLAYER_PASS) return resolvePlayerEnemyPass(player,enemies,inputVX,inputVY);
+    let touched=false;
+    for(let iter=0; iter<COLLISION_CFG.PUSH_ITER; iter++){
+      for(let i=0;i<enemies.length;i++){
+        if(resolvePairElastic(player,enemies[i])) touched=true;
       }
     }
-
-    if (this.y - halfH > GAME_HEIGHT) {
-      this.takeDamage(this.hp);
-    }
-
-    // 攻击
-    this.shootCooldown -= dt;
-    if (this.shootCooldown <= 0) {
-      this.shoot();
-      this.shootCooldown += 1 / phys.enemyAtkRateBase;
-    }
-
-    getSprite(this.bodySpriteId).update(dt);
-  }
-  shoot() {
-    const speed =
-      (this.type === "low"
-        ? phys.enemyBulletSpeedLow
-        : phys.enemyBulletSpeedMid); // 独立于背景速度
-    const bulletLogic = this.type === "low"
-      ? GameManifest.assets.fx_enemy_low_bullet.logicSize
-      : GameManifest.assets.fx_enemy_mid_bullet.logicSize;
-    const bullet = new EnemyBullet(
-      this.type === "low" ? "low" : "mid",
-      this.x,
-      this.y + this.height / 2,
-      0,
-      speed,
-      1,
-      this.bulletSpriteId,
-      bulletLogic
-    );
-    enemyBullets.push(bullet);
-  }
-  takeDamage(amount) {
-    this.hp -= amount;
-    if (this.hp <= 0) {
-      this.hp = 0;
-      this.alive = false;
-      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
-      // 小爆炸
-      fxOneShots.push(new OneShotFx(
-        this.x,
-        this.y,
-        GameManifest.entities.fx.playerExplosion.assetId,
-        GameManifest.entities.fx.playerExplosion.logicSize,
-        1.0
-      ));
-      onEnemyDead(this);
+    if(touched){
+      const minVX=Math.abs(inputVX)*COLLISION_CFG.PLAYER_INPUT_KEEP;
+      const minVY=Math.abs(inputVY)*COLLISION_CFG.PLAYER_INPUT_KEEP;
+      if(Math.abs(inputVX)>COLLISION_CFG.EPS && Math.abs(player.vx)<minVX) player.vx = Math.sign(inputVX)*minVX;
+      if(Math.abs(inputVY)>COLLISION_CFG.EPS && Math.abs(player.vy)<minVY) player.vy = Math.sign(inputVY)*minVY;
     }
   }
-  draw(ctx) {
-    // 优先同步 GIF 渲染，若非 GIF 则走 Canvas 逻辑
-    if (!syncEntityGif(this, this.bodySpriteId)) {
-      const sprite = getSprite(this.bodySpriteId);
-      sprite.draw(ctx, this.x, this.y);
-    }
 
-    // 敌机血条
-    const maxHp = this.type === 'low' ? phys.enemyHP_Low : phys.enemyHP_Mid;
-    const ratio = clamp(this.hp / maxHp, 0, 1);
-    const barWidth = this.type === 'mid' ? 60 : 40;
-    const barHeight = 4;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(this.x - barWidth / 2, this.y - this.height / 2 - 10, barWidth, barHeight);
-    ctx.fillStyle = '#ffb347';
-    ctx.fillRect(this.x - barWidth / 2 + 1, this.y - this.height / 2 - 9, (barWidth - 2) * ratio, barHeight - 2);
-  }
-}
-
-// Boss
-class Boss {
-  constructor(bossType = "boss1") {
-    this.bossType = bossType; // "boss1", "boss2", "boss3"
-    const cfg = GameManifest.entities.enemies[bossType === "boss1" ? "boss" : bossType];
-    this.width = cfg.logicSize.width;
-    this.height = cfg.logicSize.height;
-    this.x = GAME_WIDTH / 2;
-    this.y = -this.height / 2;
-    // boss2、boss3的血量与boss敌机保持一致（都是1000）
-    this.hpMax = phys.enemyHP_Boss;
-    this.hp = phys.enemyHP_Boss;
-    this.alive = true;
-
-    this.moveSpeed = bossType === "boss1" ? phys.enemySpeedBoss : phys.enemySpeedBoss23;
-    this.entered = false;
-    this.targetX = GAME_WIDTH / 2;
-    this.targetY = 200;
-    this.vx = 0;
-    this.vy = 200; // 入场下落速度
-
-    this.phase = "A"; // A/B/C/D
-    this.bodySpriteId = (bossType === "boss1") ? GameManifest.entities.enemies.boss.bodyAssetIdPhaseA : cfg.bodyAssetId;
-
-    // 攻击计时器
-    this.normalCooldown = 0;
-    this.trackCooldown = 0;
-    this.spreadCooldown = 0;
-    this.fanCooldown = 0;
-    this.burstCooldown = 0;
-
-    this.attackDropDone = false;
-    this.hpDropDone = false;
-    this.transformPlaying = false;
-    this.transformTimer = 0;
-    this.transformDuration = 3.2;
-    this.gifEl = null;
-    this.currentGifAssetId = null;
-    
-    if (bossType !== "boss1") {
-      this.entered = true;
-      this.y = 200;
-      this.x = bossType === "boss2" ? 300 : 780;
-      this.pickNewTarget();
-    }
-  }
-  pickNewTarget() {
-    const halfW = this.width / 2;
-    const halfH = this.height / 2;
-    const minX = halfW;
-    const maxX = GAME_WIDTH - halfW;
-    const minY = halfH;
-    const maxY = 960 - halfH; // 上半屏
-    this.targetX = minX + Math.random() * (maxX - minX);
-    this.targetY = minY + Math.random() * (maxY - minY);
-  }
-  update(dt) {
-    const cfg = GameManifest.entities.enemies[this.bossType === "boss1" ? "boss" : this.bossType];
-
-    // 入场
-    if (!this.entered) {
-      this.y += this.vy * dt;
-      const targetY = this.height / 2 + 80;
-      if (this.y >= targetY) {
-        this.y = targetY;
-        this.entered = true;
-        this.pickNewTarget();
+  function separateEnemyPairs(enemies){
+    const n=enemies.length;
+    if(n<2) return;
+    const cellSize=96;
+    for(let iter=0; iter<COLLISION_CFG.PUSH_ITER; iter++){
+      const grid=new Map();
+      for(let i=0;i<n;i++){
+        const e=enemies[i];
+        const cx=(e.x/cellSize)|0, cy=(e.y/cellSize)|0;
+        const key=cx+','+cy;
+        if(!grid.has(key)) grid.set(key,[]);
+        grid.get(key).push(i);
       }
-    } else {
-      // 躲避玩家子弹逻辑 (Boss 2 & 3)
-      if (this.bossType !== "boss1") {
-        for (const b of playerBullets) {
-          if (Math.abs(b.x - this.x) < 200 && b.y > this.y && b.y < this.y + 600) {
-            // 玩家子弹在下方逼近，向反方向移动
-            this.targetX = b.x > this.x ? clamp(this.x - 300, this.width/2, GAME_WIDTH - this.width/2) : clamp(this.x + 300, this.width/2, GAME_WIDTH - this.width/2);
+      const checked=new Set();
+      for(const [key,list] of grid){
+        const [sx,sy]=key.split(',').map(Number);
+        for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
+          const nk=(sx+ox)+','+(sy+oy);
+          const other=grid.get(nk);
+          if(!other) continue;
+          for(let li=0; li<list.length; li++) for(let oj=0; oj<other.length; oj++){
+            const i=list[li], j=other[oj];
+            if(i>=j) continue;
+            const id=i+'_'+j;
+            if(checked.has(id)) continue;
+            checked.add(id);
+            const a=enemies[i], b=enemies[j];
+            if(resolvePairElastic(a,b)){
+              a.stuckFrames=(a.stuckFrames||0)+1;
+              b.stuckFrames=(b.stuckFrames||0)+1;
+              if(a.stuckFrames>COLLISION_CFG.STUCK_FRAMES){
+                const tx=(Math.random()-0.5)*COLLISION_CFG.STUCK_JITTER;
+                const ty=(Math.random()-0.5)*COLLISION_CFG.STUCK_JITTER;
+                a.vx+=tx; a.vy+=ty; a.stuckFrames=0;
+              }
+              if(b.stuckFrames>COLLISION_CFG.STUCK_FRAMES){
+                const tx=(Math.random()-0.5)*COLLISION_CFG.STUCK_JITTER;
+                const ty=(Math.random()-0.5)*COLLISION_CFG.STUCK_JITTER;
+                b.vx+=tx; b.vy+=ty; b.stuckFrames=0;
+              }
+            }
           }
         }
       }
-
-      // 自由移动（上半屏游走）
-      const dx = this.targetX - this.x;
-      const dy = this.targetY - this.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const vx = (dx / dist) * this.moveSpeed;
-      const vy = (dy / dist) * this.moveSpeed;
-      this.x += vx * dt;
-      this.y += vy * dt;
-
-      // 边界修正
-      const halfW = this.width / 2;
-      const halfH = this.height / 2;
-      const minX = halfW;
-      const maxX = GAME_WIDTH - halfW;
-      const minY = halfH;
-      const maxY = 960 - halfH;
-      
-      let clamped = false;
-      if (this.x < minX) { this.x = minX; clamped = true; } 
-      if (this.x > maxX) { this.x = maxX; clamped = true; }
-      if (this.y < minY) { this.y = minY; clamped = true; } 
-      if (this.y > maxY) { this.y = maxY; clamped = true; }
-
-      if (clamped || dist < 10 || Math.random() < 0.01) {
-        this.pickNewTarget();
-      }
-    }
-
-    if (this.bossType === "boss1") {
-      // 阶段判定 & 变形解锁
-      if (this.hp > 664) {
-        this.phase = "A";
-        this.bodySpriteId = GameManifest.entities.enemies.boss.bodyAssetIdPhaseA;
-      } else if (this.hp > 500) {
-        this.phase = "B";
-        this.bodySpriteId = GameManifest.entities.enemies.boss.bodyAssetIdPhaseA;
-      } else if (this.hp > 332) {
-        this.phase = "C";
-        if (!bossTransformPlayed) {
-          this.transformPlaying = true;
-          this.transformTimer = 0;
-          bossTransformPlayed = true;
-        }
-      } else {
-        this.phase = "D";
-      }
-
-      // 变形动画更新
-      if (this.transformPlaying) {
-        this.transformTimer += dt;
-        getSprite(GameManifest.entities.enemies.boss.transformToHalfAssetId).update(dt);
-        if (this.transformTimer >= this.transformDuration) {
-          this.transformPlaying = false;
-          this.bodySpriteId = GameManifest.entities.enemies.boss.bodyAssetIdPhaseC;
-        }
-      } else {
-        getSprite(this.bodySpriteId).update(dt);
-      }
-
-      // 攻击掉落阈值
-      if (!this.attackDropDone && this.hp <= 664) {
-        this.attackDropDone = true;
-        globalBossAttackDropDone = true;
-        globalAttackRewardStage = 3;
-        spawnAttackReward(this.x, this.y + this.height / 2, "boss");
-      }
-      if (!this.hpDropDone && this.hp <= 332) {
-        this.hpDropDone = true;
-        globalBossHpDropDone = true;
-        spawnHpReward(this.x, this.y + this.height / 2, "boss");
-      }
-
-      // 攻击逻辑
-      this.normalCooldown -= dt;
-      if (this.normalCooldown <= 0) {
-        this.shootNormal();
-        this.normalCooldown += 1 / phys.bossBulletRateNormal;
-      }
-      this.trackCooldown -= dt;
-      if (this.trackCooldown <= 0) {
-        this.shootTrack();
-        this.trackCooldown += 1 / phys.bossBulletRateTrack;
-      }
-      if (this.phase === "C" || this.phase === "D") {
-        this.spreadCooldown -= dt;
-        if (this.spreadCooldown <= 0) {
-          this.shootSpread();
-          this.spreadCooldown += 1 / phys.bossBulletRateSpread;
-        }
-      }
-    } else if (this.bossType === "boss2") {
-      // Boss 2 扇形攻击 (6列)
-      getSprite(this.bodySpriteId).update(dt);
-      this.fanCooldown -= dt;
-      if (this.fanCooldown <= 0) {
-        this.shootFan();
-        this.fanCooldown += 1.5; // 每 1.5 秒发射一次扇形
-      }
-    } else if (this.bossType === "boss3") {
-      // Boss 3 连发追踪
-      getSprite(this.bodySpriteId).update(dt);
-      this.burstCooldown -= dt;
-      if (this.burstCooldown <= 0) {
-        this.shootBurstTrack();
-        this.burstCooldown += 2.0; // 每 2 秒发射一波
-      }
     }
   }
-  shootNormal() {
-    const cfg = GameManifest.assets.boss_lightning_normal;
-    const bullet = new EnemyBullet(
-      "boss_normal",
-      this.x,
-      this.y + this.height / 2,
-      0,
-      phys.bossBulletSpeedNormal,
-      2,
-      GameManifest.entities.enemies.boss.bulletAssets.normal,
-      cfg.logicSize
+
+  function isEnemyValid(e){
+    if(!e) return false;
+    if(e.dead || e.remove || e.removed || e.toRemove) return false;
+    if(!(e.hp > 0)) return false;
+    if(!Number.isFinite(e.x) || !Number.isFinite(e.y)) return false;
+    return true;
+  }
+
+  function getEnemyId(e){
+    return e ? e.__id : null;
+  }
+
+  function getEnemyById(id){
+    if(id == null) return null;
+    const arr = state.enemies || [];
+    for(let i=0;i<arr.length;i++){
+      const e=arr[i];
+      if(e && e.__id===id) return e;
+    }
+    return null;
+  }
+
+  function getNearestEnemyToPoint(x, y){
+    const arr = state.enemies || [];
+    let best = null;
+    let bestD2 = Infinity;
+    for(let i=0;i<arr.length;i++){
+      const e = arr[i];
+      if(!isEnemyValid(e)) continue;
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const d2 = dx*dx + dy*dy;
+      if(d2 < bestD2){ bestD2 = d2; best = e; }
+    }
+    return best;
+  }
+
+  function getNearestEnemyToPlayer(){
+    const p = state.player;
+    if(!p) return null;
+    const c = getPlayerCenter(p);
+    return getNearestEnemyToPoint(c.cx, c.cy);
+  }
+  function fireArcaneShot(player, dmg){
+    const target=getNearestEnemyToPlayer();
+    const facing=getPlayerFacing();
+    let dirX=facing.x, dirY=facing.y;
+    if(target&&Number.isFinite(target.x)&&Number.isFinite(target.y)){
+      const dx=target.x-player.x, dy=target.y-player.y;
+      const dl=Math.hypot(dx,dy);
+      if(dl>COLLISION_SAFE.EPS){ dirX=dx/dl; dirY=dy/dl; }
+    }
+    const sp=260;
+    state.proj.push({
+      x:player.x,y:player.y,vx:dirX*sp,vy:dirY*sp,r:192,dmg,
+      from:'player',seed:Math.random()*100,targetRef:target||null,targetId:target?getEnemyId(target):null,
+      homingStrength:14,turnRateClamp:20,retargets:0
+    });
+  }
+
+  function resolveOrbTarget(orb){
+    if(!orb) return null;
+    let t = null;
+    if(orb.targetId != null) t = getEnemyById(orb.targetId);
+    if(!isEnemyValid(t)) t = null;
+    if(!t && orb.targetRef && isEnemyValid(orb.targetRef)) t = orb.targetRef;
+    if(!isEnemyValid(t)) return null;
+    return t;
+  }
+
+  function applyOrbHoming(orb, dt){
+    if(!orb) return;
+    const EPS = COLLISION_SAFE.EPS;
+    const speedNow = Math.hypot(safeFinite(orb.vx,0), safeFinite(orb.vy,0));
+    if(speedNow <= EPS) return;
+
+    let target = resolveOrbTarget(orb);
+    if(!target){
+      target = getNearestEnemyToPoint(safeFinite(orb.x,0), safeFinite(orb.y,0));
+      if(target){
+        orb.targetRef = target;
+        orb.targetId = getEnemyId(target);
+        orb.retargets = (orb.retargets||0) + 1;
+        state.orbRetargets = (state.orbRetargets||0) + 1;
+      }
+    }
+    if(!target) return;
+
+    const tx = safeFinite(target.x, NaN), ty = safeFinite(target.y, NaN);
+    if(!Number.isFinite(tx) || !Number.isFinite(ty)) return;
+
+    const dx = tx - orb.x, dy = ty - orb.y;
+    const dLen = Math.hypot(dx,dy);
+    if(dLen <= EPS) return;
+    const dirDx = dx / dLen, dirDy = dy / dLen;
+
+    const cvx = orb.vx / speedNow, cvy = orb.vy / speedNow;
+    const hs = clamp(orb.homingStrength||9, 0, 64);
+    let steer = clamp(hs * dt, 0, 1);
+    if(Number.isFinite(orb.turnRateClamp) && orb.turnRateClamp>0){
+      steer = Math.min(steer, orb.turnRateClamp * dt);
+    }
+
+    let nx = cvx + (dirDx - cvx) * steer;
+    let ny = cvy + (dirDy - cvy) * steer;
+    const nLen = Math.hypot(nx,ny);
+    if(nLen > EPS){
+      nx /= nLen; ny /= nLen;
+      orb.vx = nx * speedNow;
+      orb.vy = ny * speedNow;
+    }
+  }
+
+  const state={};
+  function getDifficultyStep(){
+    const every = Math.max(1, COMBAT_TUNING.enemyGrowth.everySec);
+    return Math.floor((state.time||0) / every);
+  }
+  function getSpawnInterval(){
+    const t = Math.max(0, state.time||0);
+    return clamp(
+      COMBAT_TUNING.spawn.intervalStart - t * COMBAT_TUNING.spawn.intervalDropPerSec,
+      COMBAT_TUNING.spawn.intervalMin,
+      COMBAT_TUNING.spawn.intervalStart
     );
-    enemyBullets.push(bullet);
   }
-  shootTrack() {
-    const cfg = GameManifest.assets.boss_lightning_track;
-    const trackSpeed = phys.bossBulletSpeedTrack;
-    let vx = 0;
-    let vy = trackSpeed;
-    if (player && player.isAlive) {
-      const dx = player.x - this.x;
-      const dy = player.y - this.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      vx = (dx / dist) * trackSpeed;
-      vy = (dy / dist) * trackSpeed;
+  function getEnemyGrowthMultipliers(){
+    const step = getDifficultyStep();
+    return {
+      hpMul: 1 + step * COMBAT_TUNING.enemyGrowth.hpPerStep,
+      dmgMul: 1 + step * COMBAT_TUNING.enemyGrowth.dmgPerStep
+    };
+  }
+  function buildEnemyStats(kind){
+    const cfg = COMBAT_TUNING.enemy[kind];
+    const g = getEnemyGrowthMultipliers();
+    return {
+      hp: Math.round(cfg.hp * g.hpMul),
+      maxHp: Math.round(cfg.hp * g.hpMul),
+      contactDmg: Math.max(1, Math.round((cfg.contactDmg||0) * g.dmgMul)),
+      bulletDmg: Math.max(1, Math.round((cfg.bulletDmg||0) * g.dmgMul)),
+      attackCd: cfg.attackCd || cfg.bulletInterval || 1
+    };
+  }
+  function getSpawnRule(){
+    const t = Math.max(0, state.time||0);
+    const heavyProb = clamp(0.07 + t*0.00046, 0.07, 0.24);
+    const rangedProb = clamp(0.13 + t*0.00052, 0.13, 0.30);
+    const flyingProb = clamp(0.09 + t*0.00034, 0.09, 0.23);
+    return { heavyProb, rangedProb, flyingProb };
+  }
+  function restart(){
+    for(const e of (state.enemies||[])){ if(e.gifEl){ e.gifEl.remove(); e.gifEl=null; } }
+    Object.assign(state,{time:0,fps:0,fpsAcc:0,fpsCnt:0,paused:false,dead:false,kills:0,killStats:{melee:0,ranged:0,heavy:0,flying:0},cam:{x:0,y:0},enemies:[],enemyBullets:[],proj:[],slashes:[],dashFx:[],heavyExplosions:[],flyingClawFx:[],spikeFx:[],blockFx:[],xpDrops:[],xpFlyFx:[],arcaneBurst:null,cards:[],level:1,xp:0,xpNeed:20,combo:0,regenTick:0,spawnTimer:0,growthStepApplied:0,showCollBox:false,showCenterDebug:false,centerDiag:{pbVsHit:0,pbVsSpin:0,ok:true},nextEnemyId:1,orbRetargets:0,dashAimDebug:{bestHit:0,bestDeg:0}});
+    state.player={x:0,y:0,w:128,h:128,vx:0,vy:0,hp:COMBAT_TUNING.player.baseHp,maxHp:COMBAT_TUNING.player.baseHp,speed:MANIFEST.physicsConfig.speedBase*90,hitCd:0,lifeSteal:COMBAT_TUNING.player.baseLifeSteal,regenLv:0,maxHpLv:0,moveLv:0,lifeStealLv:0,blockLv:1,
+      atkLv:0, skills:{slash:1,dash:0,arcane:0}, cds:{slash:0,dash:0,arcane:0,thorns:0}, lastFacing:{x:1,y:0}, lastDashDir:{x:1,y:0}, isPlayer:true};
+    makeLandmarks();
+  }
+
+  function makeLandmarks(){ state.landmarks=[]; for(let i=1;i<=12;i++){ state.landmarks.push({x:200+(i%4)*500,y:180+Math.floor((i-1)/4)*700,s:80,id:'B'+i}); } }
+
+  const FLYING_SPEED = MANIFEST.physicsConfig.speedBase * 90 * 0.55;
+  function spawnEnemy(){
+    const px=state.player.x, py=state.player.y;
+    const angle=Math.random()*Math.PI*2;
+    const dist=400+Math.random()*180;
+    let x=px+Math.cos(angle)*dist, y=py+Math.sin(angle)*dist;
+    const spawnRule = getSpawnRule();
+    const r=Math.random();
+    if(r<spawnRule.heavyProb){
+      const sz=MANIFEST.assets.enemy_heavy.logicSize;
+      const st = buildEnemyStats('heavy');
+      state.enemies.push({__id: state.nextEnemyId++, x,y,w:sz.width,h:sz.height,vx:0,vy:0,hp:st.hp,maxHp:st.maxHp,contactDmg:st.contactDmg,attackCd:st.attackCd,enemyLv:getDifficultyStep()+1,type:'enemy_heavy',enemyClass:'heavy',ranged:false,heavy:true,shoot:0,stuckFrames:0});
+    } else if(r<spawnRule.heavyProb+spawnRule.flyingProb){
+      const sz=MANIFEST.assets.enemy_flying.logicSize;
+      const ppx=state.player.x, ppy=state.player.y;
+      const growPack = Math.floor(getDifficultyStep()/COMBAT_TUNING.spawn.flyingPackStep);
+      const packCount = COMBAT_TUNING.enemy.flying.packCount + clamp(growPack, 0, 4);
+      for(let i=0;i<packCount;i++){
+        const fa=Math.random()*Math.PI*2;
+        const fd=400+Math.random()*150;
+        const fx=ppx+Math.cos(fa)*fd;
+        const fy=ppy+Math.sin(fa)*fd;
+        const st = buildEnemyStats('flying');
+        state.enemies.push({__id: state.nextEnemyId++, x:fx,y:fy,w:sz.width,h:sz.height,vx:0,vy:0,hp:st.hp,maxHp:st.maxHp,contactDmg:st.contactDmg,attackCd:st.attackCd,enemyLv:getDifficultyStep()+1,type:'enemy_flying',enemyClass:'flying',ranged:false,flying:true,shoot:0,stuckFrames:0});
+      }
+    } else {
+      const ranged=Math.random()<spawnRule.rangedProb;
+      const types=['enemy_skeleton_marksman','enemy_bloodthirsty_gargoyle','enemy_toxic_ghoul','enemy_common_undead_demon'];
+      const t=types[(Math.random()*types.length)|0];
+      const baseSz=MANIFEST.assets[t].logicSize;
+      const sz = ranged ? {width:Math.round(baseSz.width*COMBAT_TUNING.visual.rangedEnemyScale), height:Math.round(baseSz.height*COMBAT_TUNING.visual.rangedEnemyScale)} : baseSz;
+      const st = buildEnemyStats(ranged ? 'ranged' : 'melee');
+      const shootCd = ranged ? st.attackCd : 0;
+      state.enemies.push({__id: state.nextEnemyId++, x,y,w:sz.width,h:sz.height,vx:0,vy:0,hp:st.hp,maxHp:st.maxHp,contactDmg:st.contactDmg,bulletDmg:st.bulletDmg,attackCd:st.attackCd,enemyLv:getDifficultyStep()+1,type:t,enemyClass:ranged?'ranged':'melee',ranged,shoot:Math.random()*shootCd,stuckFrames:0});
     }
-    const bullet = new EnemyBullet(
-      "boss_track",
-      this.x,
-      this.y + this.height / 2,
-      vx,
-      vy,
-      3,
-      GameManifest.entities.enemies.boss.bulletAssets.track,
-      cfg.logicSize
-    );
-    enemyBullets.push(bullet);
   }
-  shootSpread() {
-    const cfg = GameManifest.assets.boss_lightning_spread;
-    const spreadSpeed = phys.bossBulletSpeedSpread;
-    const count = 12;
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count;
-      const vx = Math.cos(angle) * spreadSpeed;
-      const vy = Math.sin(angle) * spreadSpeed;
-      const bullet = new EnemyBullet(
-        "boss_spread",
-        this.x,
-        this.y,
-        vx,
-        vy,
-        2,
-        GameManifest.entities.enemies.boss.bulletAssets.spread,
-        cfg.logicSize
-      );
-      enemyBullets.push(bullet);
+
+  function giveXp(v){ state.xp+=v; while(state.xp>=state.xpNeed){ state.xp-=state.xpNeed; state.level++; state.xpNeed=Math.floor(state.xpNeed*1.22+8); levelUp(); }}
+  function getEnemyXpValue(e){
+    const cls=e.enemyClass||'melee';
+    const base = cls==='heavy' ? 14 : cls==='ranged' ? 7 : cls==='flying' ? 6 : 5;
+    const lv = Math.max(1, e.enemyLv||1);
+    return Math.max(1, Math.round(base * (1 + (lv-1)*0.16)));
+  }
+  function getXpBarRect(){
+    const w=320, h=10, x=(vw-w)/2, y=34;
+    return {x,y,w,h};
+  }
+  function spawnXpDropsFromEnemy(e){
+    const total=getEnemyXpValue(e);
+    const count=clamp(Math.ceil(total/6),1,8);
+    let remain=total;
+    for(let i=0;i<count;i++){
+      const val = (i===count-1)?remain:Math.max(1,Math.floor(total/count));
+      remain-=val;
+      const a=Math.random()*Math.PI*2;
+      const sp=40+Math.random()*120;
+      state.xpDrops.push({x:e.x,y:e.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-20,value:val,mode:'ground',life:16,t:0,r:4+Math.random()*2});
     }
   }
-  shootFan() {
-    const count = 6;
-    const spreadAngle = Math.PI / 3; // 60度扇形
-    for (let i = 0; i < count; i++) {
-      const angle = Math.PI/2 - spreadAngle/2 + (spreadAngle * i / (count - 1));
-      const vx = Math.cos(angle) * 500;
-      const vy = Math.sin(angle) * 500;
-      const bullet = new EnemyBullet(
-        "boss2_black",
-        this.x,
-        this.y + this.height / 2,
-        vx,
-        vy,
-        2,
-        "",
-        { width: 50, height: 80 }
-      );
-      enemyBullets.push(bullet);
+  function skillScaleAtLv(lv){ return 1 + Math.max(0, lv-1) * 0.08; }
+  function getUpgradePreview(opt, pl){
+    const maxLv = COMBAT_TUNING.maxSkillLv;
+    const lines = [];
+    if(opt.kind==='atk'){
+      const b = pl.skills[opt.key]||0;
+      const a = Math.min(maxLv, b+1);
+      if(opt.key==='slash'){
+        lines.push(`等级 ${b} -> ${a}`);
+        lines.push(`斩击数量 ${Math.max(1,b)} -> ${Math.max(1,a)}`);
+        lines.push(`CD ${(0.75/skillScaleAtLv(b)).toFixed(2)}s -> ${(0.75/skillScaleAtLv(a)).toFixed(2)}s`);
+      }else if(opt.key==='dash'){
+        const bw=COMBAT_TUNING.dash.widthBase+(b-1)*COMBAT_TUNING.dash.widthPerLv, aw=COMBAT_TUNING.dash.widthBase+(a-1)*COMBAT_TUNING.dash.widthPerLv;
+        const bl=vw*COMBAT_TUNING.dash.lenBaseRatio+(b-1)*COMBAT_TUNING.dash.lenPerLv, al=vw*COMBAT_TUNING.dash.lenBaseRatio+(a-1)*COMBAT_TUNING.dash.lenPerLv;
+        const bk=COMBAT_TUNING.dash.knockbackBase+(b-1)*COMBAT_TUNING.dash.knockbackPerLv, ak=COMBAT_TUNING.dash.knockbackBase+(a-1)*COMBAT_TUNING.dash.knockbackPerLv;
+        lines.push(`等级 ${b} -> ${a}`);
+        lines.push(`宽度 ${bw.toFixed(0)} -> ${aw.toFixed(0)}`);
+        lines.push(`长度 ${bl.toFixed(0)} -> ${al.toFixed(0)}`);
+        lines.push(`击飞 ${bk.toFixed(0)} -> ${ak.toFixed(0)}`);
+      }else if(opt.key==='arcane'){
+        lines.push(`等级 ${b} -> ${a}`);
+        lines.push(`发射数量 ${Math.max(1,b)} -> ${Math.max(1,a)}`);
+        lines.push(`CD ${(1.1/skillScaleAtLv(b)).toFixed(2)}s -> ${(1.1/skillScaleAtLv(a)).toFixed(2)}s`);
+      }
+    }else{
+      const b = pl[opt.key]||0;
+      const a = Math.min(maxLv, b+1);
+      lines.push(`等级 ${b} -> ${a}`);
+      if(opt.key==='lifeStealLv'){
+        const bv=(COMBAT_TUNING.player.baseLifeSteal + b*COMBAT_TUNING.player.lifeStealPerLv)*100;
+        const av=(COMBAT_TUNING.player.baseLifeSteal + a*COMBAT_TUNING.player.lifeStealPerLv)*100;
+        lines.push(`吸血率 ${bv.toFixed(1)}% -> ${av.toFixed(1)}%`);
+      }else if(opt.key==='maxHpLv'){
+        lines.push(`最大生命 +${COMBAT_TUNING.player.maxHpUpgradeGain}`);
+      }else if(opt.key==='moveLv'){
+        const bv=(1+b*COMBAT_TUNING.player.movePerLv)*100;
+        const av=(1+a*COMBAT_TUNING.player.movePerLv)*100;
+        lines.push(`移速倍率 ${bv.toFixed(1)}% -> ${av.toFixed(1)}%`);
+      }else if(opt.key==='regenLv'){
+        const bv=COMBAT_TUNING.player.regenPerTick*(1+b*COMBAT_TUNING.player.regenPerLv);
+        const av=COMBAT_TUNING.player.regenPerTick*(1+a*COMBAT_TUNING.player.regenPerLv);
+        lines.push(`每0.5秒恢复 ${bv.toFixed(2)} -> ${av.toFixed(2)}`);
+      }else if(opt.key==='atkLv'){
+        const bv=(1+b*COMBAT_TUNING.player.atkPerLv)*100;
+        const av=(1+a*COMBAT_TUNING.player.atkPerLv)*100;
+        lines.push(`全技能伤害 ${bv.toFixed(1)}% -> ${av.toFixed(1)}%`);
+      }else if(opt.key==='blockLv'){
+        const bv=clamp((0.06+b*0.022)*100,0,52);
+        const av=clamp((0.06+a*0.022)*100,0,52);
+        lines.push(`格挡免伤率 ${bv.toFixed(1)}% -> ${av.toFixed(1)}%`);
+      }
     }
+    return lines;
   }
-  shootBurstTrack() {
-    let delay = 0;
-    for (let i = 0; i < 3; i++) {
-      setTimeout(() => {
-        if (!this.alive || gameState !== GameStateEnum.PLAYING) return;
-        const trackSpeed = 450;
-        let vx = 0, vy = trackSpeed;
-        if (player && player.isAlive) {
-          const dx = player.x - this.x;
-          const dy = player.y - this.y;
-          const dist = Math.hypot(dx, dy) || 1;
-          vx = (dx / dist) * trackSpeed;
-          vy = (dy / dist) * trackSpeed;
+  function levelUp(){ state.paused=true; const opts=buildOptions(); state.cards=opts.map((o,i)=>({x:30+i*168,y:278,w:158,h:250,opt:o,preview:getUpgradePreview(o,state.player)})); }
+  const CHOICE_DEBUG = true;
+  const choicePerfStats = { bindCount:0, buildMs:0, cacheHit:false, round:0 };
+  let choiceCache = null;
+
+  function invalidateChoiceCache(){ choiceCache = null; }
+
+  function pickWeightedUniqueAtk(atkSource, pickCount){
+    const pool = atkSource.slice();
+    const picked = [];
+    for(let i=0; i<pickCount && pool.length>0; i++){
+      let total=0;
+      for(let j=0; j<pool.length; j++) total += pool[j].weight;
+      let r=Math.random()*total;
+      let idx=0;
+      for(; idx<pool.length; idx++){
+        r -= pool[idx].weight;
+        if(r<=0) break;
+      }
+      if(idx>=pool.length) idx = pool.length-1;
+      picked.push(pool[idx]);
+      pool.splice(idx,1);
+    }
+    return picked;
+  }
+
+  function buildOptions(){
+    const t0 = performance.now();
+
+    if(choiceCache){
+      choicePerfStats.cacheHit = true;
+      choicePerfStats.buildMs = +(performance.now()-t0).toFixed(3);
+      if(CHOICE_DEBUG) console.log(`[choice] build=${choicePerfStats.buildMs}ms cacheHit=true bindCount=${choicePerfStats.bindCount}`);
+      return choiceCache.opts;
+    }
+
+    choicePerfStats.cacheHit = false;
+    const pl = state.player;
+
+    const atk=[];
+    const atkDefs=[['slash','斩击'],['dash','突刺'],['arcane','奥术弹']];
+    for(let i=0;i<atkDefs.length;i++){
+      const key=atkDefs[i][0], name=atkDefs[i][1];
+      const lv=pl.skills[key];
+      if(lv>=COMBAT_TUNING.maxSkillLv) continue;
+      let w=1 + (COMBAT_TUNING.maxSkillLv - lv) * 0.04;
+      atk.push({kind:'atk',key,name,weight:w});
+    }
+
+    const pickedAtk = pickWeightedUniqueAtk(atk,2);
+
+    const pas=[['maxHpLv','最大生命'],['moveLv','移速'],['lifeStealLv','吸血'],['regenLv','生命恢复'],['atkLv','攻击力'],['blockLv','格挡']];
+    const passPool = pas.filter(([key]) => (pl[key]||0) < COMBAT_TUNING.maxSkillLv);
+    const p=passPool.length ? passPool[(Math.random()*passPool.length)|0] : pas[(Math.random()*pas.length)|0];
+    const opts = pickedAtk.map(v=>({kind:v.kind,key:v.key,name:v.name}));
+    opts.push({kind:'pas',key:p[0],name:p[1]});
+
+    choiceCache = { round: ++choicePerfStats.round, opts };
+    choicePerfStats.buildMs = +(performance.now()-t0).toFixed(3);
+    if(CHOICE_DEBUG) console.log(`[choice] build=${choicePerfStats.buildMs}ms cacheHit=false bindCount=${choicePerfStats.bindCount}`);
+    return opts;
+  }
+  function chooseUpgrade(i){ if(!state.paused) return; const c=state.cards[i]; if(!c) return; const o=c.opt; const pl=state.player; if(o.kind==='atk'){ if(pl.skills[o.key]<COMBAT_TUNING.maxSkillLv){ pl.skills[o.key]++; }} else { if((pl[o.key]||0)<COMBAT_TUNING.maxSkillLv) pl[o.key]++; if(o.key==='maxHpLv'){const add=COMBAT_TUNING.player.maxHpUpgradeGain; pl.maxHp+=add; pl.hp+=add;} if(o.key==='lifeStealLv'){ pl.lifeSteal = COMBAT_TUNING.player.baseLifeSteal + pl.lifeStealLv * COMBAT_TUNING.player.lifeStealPerLv; } }
+    invalidateChoiceCache();
+    state.paused=false; state.cards=[];
+  }
+
+  restart();
+  let last=performance.now();
+  function loop(now){
+    const rawDt=(now-last)/1000;
+    const dt=clamp(rawDt, COLLISION_SAFE.DT_MIN, Math.min(PERF.DT_MAX, COLLISION_SAFE.DT_MAX));
+    if(rawDt!==dt) collDiag.clampCount++;
+    last=now;
+    if(!loadingState.ready){
+      renderLoading();
+      requestAnimationFrame(loop);
+      return;
+    }
+    state.fpsAcc+=dt; state.fpsCnt++; if(state.fpsAcc>=0.5){state.fps=state.fpsCnt/state.fpsAcc; state.fpsAcc=0; state.fpsCnt=0;}
+    if(!state.paused&&!state.dead) update(dt);
+    render(); requestAnimationFrame(loop);
+  }
+
+  function getPlayerFacing(){
+    const p = state.player;
+    const ix=(keys['a']||keys['arrowleft']?-1:0)+(keys['d']||keys['arrowright']?1:0);
+    const iy=(keys['w']||keys['arrowup']?-1:0)+(keys['s']||keys['arrowdown']?1:0);
+    const ilen=Math.hypot(ix,iy);
+    if(ilen>1e-6){
+      const fx=ix/ilen, fy=iy/ilen;
+      p.lastFacing={x:fx,y:fy};
+      return p.lastFacing;
+    }
+    const lf=p.lastFacing;
+    if(lf&&Number.isFinite(lf.x)&&Number.isFinite(lf.y)){
+      const llen=Math.hypot(lf.x,lf.y);
+      if(llen>1e-6) return {x:lf.x/llen,y:lf.y/llen};
+    }
+    return {x:1,y:0};
+  }
+
+  // DASH_AUTO_PATH_AIM_PATCH_V1
+  function normalizeDir(x, y, fallbackX=1, fallbackY=0){
+    const len = Math.hypot(x, y);
+    if(len > COLLISION_SAFE.EPS && Number.isFinite(len)) return {x:x/len, y:y/len};
+    const fl = Math.hypot(fallbackX, fallbackY);
+    if(fl > COLLISION_SAFE.EPS && Number.isFinite(fl)) return {x:fallbackX/fl, y:fallbackY/fl};
+    return {x:1, y:0};
+  }
+
+  // DASH_AUTO_PATH_AIM_PATCH_V1
+  function calcDashBestDir(player, dashRange, dashWidth){
+    const enemies = state.enemies || [];
+    const valid = [];
+    for(let i=0;i<enemies.length;i++) if(isEnemyValid(enemies[i])) valid.push(enemies[i]);
+
+    const moveDir = normalizeDir(player.vx, player.vy, player.lastFacing?.x||1, player.lastFacing?.y||0);
+    const lastDir = normalizeDir(player.lastDashDir?.x||moveDir.x, player.lastDashDir?.y||moveDir.y, moveDir.x, moveDir.y);
+
+    const CAND = 16;
+    let best = {count:-1, distSum:Infinity, align:-Infinity, dir:{x:moveDir.x,y:moveDir.y}, deg:Math.atan2(moveDir.y, moveDir.x)*180/Math.PI};
+
+    for(let i=0;i<CAND;i++){
+      const a = (Math.PI*2*i)/CAND;
+      const dirX = Math.cos(a), dirY = Math.sin(a);
+      let count = 0, distSum = 0;
+
+      for(let j=0;j<valid.length;j++){
+        const e = valid[j];
+        const rx = e.x - player.x;
+        const ry = e.y - player.y;
+        const proj = rx*dirX + ry*dirY;
+        if(proj < 0 || proj > dashRange) continue;
+        const perp = Math.abs(rx*dirY - ry*dirX);
+        const enemyR = Math.max(8, Math.min(e.w, e.h)*0.28);
+        if(perp <= (dashWidth*0.5 + enemyR)){
+          count++;
+          distSum += Math.hypot(rx, ry);
         }
-        const bullet = new EnemyBullet(
-          "boss3_gold",
-          this.x,
-          this.y + this.height / 2,
-          vx,
-          vy,
-          3,
-          "",
-          { width: 60, height: 60 }
-        );
-        enemyBullets.push(bullet);
-      }, delay);
-      delay += 200;
-    }
-  }
-  takeDamage(amount) {
-    if (!this.alive) return;
-    this.hp -= amount;
-    if (this.hp < 0) this.hp = 0;
+      }
 
-    if (this.hp <= 0) {
-      this.alive = false;
-      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
-      // 所有 Boss（包括 boss1、boss2、boss3）血条清空时，都会触发爆炸动画
-      fxOneShots.push(new OneShotFx(
-        this.x,
-        this.y,
-        GameManifest.entities.fx.bossExplosion.assetId,
-        GameManifest.entities.fx.bossExplosion.logicSize,
-        1.0,
-        () => onBossDead(this)
-      ));
-    }
-  }
-  draw(ctx) {
-    if (!this.alive) return;
-    let currentAsset = this.bodySpriteId;
-    if (this.bossType === "boss1" && this.transformPlaying) {
-      currentAsset = GameManifest.entities.enemies.boss.transformToHalfAssetId;
-    }
-    
-    if (!syncEntityGif(this, currentAsset)) {
-      const sprite = getSprite(currentAsset);
-      sprite.draw(ctx, this.x, this.y);
+      const align = dirX*moveDir.x + dirY*moveDir.y;
+      const better =
+        (count > best.count) ||
+        (count === best.count && distSum < best.distSum - 1e-6) ||
+        (count === best.count && Math.abs(distSum-best.distSum)<=1e-6 && align > best.align + 1e-6);
+      if(better){
+        best = {count, distSum, align, dir:{x:dirX,y:dirY}, deg:a*180/Math.PI};
+      }
     }
 
-    const barWidth2 = 160;
-    const barHeight2 = 6;
+    if(best.count<=0){
+      const fallbackMove = normalizeDir(player.vx, player.vy, player.lastFacing?.x||1, player.lastFacing?.y||0);
+      const fallbackLast = normalizeDir(player.lastDashDir?.x||fallbackMove.x, player.lastDashDir?.y||fallbackMove.y, fallbackMove.x, fallbackMove.y);
+      let use = fallbackMove;
+      if(Math.hypot(player.vx, player.vy) <= COLLISION_SAFE.EPS) use = fallbackLast;
+      if(!Number.isFinite(use.x)||!Number.isFinite(use.y)) use = {x:1,y:0};
+      best.dir = use;
+      best.deg = Math.atan2(use.y, use.x)*180/Math.PI;
+      best.count = 0;
+    }
+
+    return best;
+  }
+
+  function update(dt){
+    const frameStart = performance.now();
+    let skipHeavyCollision = false;
+    const p=state.player;
+    state.time+=dt;
+    const curStep = getDifficultyStep();
+    while((state.growthStepApplied||0) < curStep){
+      state.growthStepApplied = (state.growthStepApplied||0) + 1;
+      for(const e of (state.enemies||[])){
+        const hpGainRatio = 1 + COMBAT_TUNING.enemyGrowth.hpPerStep * 0.35;
+        const dmgGainRatio = 1 + COMBAT_TUNING.enemyGrowth.dmgPerStep * 0.5;
+        const oldMax = Math.max(1, e.maxHp||e.hp||1);
+        const newMax = Math.round(oldMax * hpGainRatio);
+        e.maxHp = newMax;
+        e.hp = Math.min(newMax, (e.hp||0) + Math.max(1, Math.round((newMax-oldMax)*0.65)));
+        if(Number.isFinite(e.contactDmg)) e.contactDmg = Math.max(1, Math.round(e.contactDmg * dmgGainRatio));
+        if(Number.isFinite(e.bulletDmg)) e.bulletDmg = Math.max(1, Math.round(e.bulletDmg * dmgGainRatio));
+      }
+    }
+    state.spawnTimer -= dt;
+    if(state.spawnTimer<=0){
+      spawnEnemy();
+      state.spawnTimer = getSpawnInterval();
+    }
+    let ix=(keys['a']||keys['arrowleft']?-1:0)+(keys['d']||keys['arrowright']?1:0);
+    let iy=(keys['w']||keys['arrowup']?-1:0)+(keys['s']||keys['arrowdown']?1:0);
+    if(touchMove.active){ ix += touchMove.dirX; iy += touchMove.dirY; }
+    const len=Math.hypot(ix,iy);
+    if(len>COLLISION_SAFE.EPS){ ix/=len; iy/=len; } else { ix=0; iy=0; }
+    // Keep facing synced with movement input so player can turn instantly.
+    if(Math.hypot(ix,iy) > COLLISION_SAFE.EPS){
+      p.lastFacing = {x:ix, y:iy};
+    }
+    const moveMul=1 + p.moveLv * COMBAT_TUNING.player.movePerLv;
+    const inputVX = ix*p.speed*moveMul*dt*18;
+    const inputVY = iy*p.speed*moveMul*dt*18;
+    p.vx=(p.vx*MANIFEST.physicsConfig.friction)+inputVX; p.vy=(p.vy*MANIFEST.physicsConfig.friction)+inputVY;
+
+    safeClampSpeed(p);
+    safeClampFrameDisp(p, dt);
+    p.x+=safeFinite(p.vx*dt,0);
+    p.y+=safeFinite(p.vy*dt,0);
+    resolvePlayerEnemyPush(p,state.enemies,inputVX,inputVY);
+
+    state.cam.x=p.x-vw/2; state.cam.y=p.y-vh/2;
+    const xpBar = getXpBarRect();
+    for(const d of (state.xpDrops||[])){
+      d.t += dt;
+      if(d.mode==='ground'){
+        d.vx*=0.93; d.vy*=0.93;
+        d.x += d.vx*dt; d.y += d.vy*dt;
+        const dx=p.x-d.x, dy=p.y-d.y;
+        const pd=Math.hypot(dx,dy)||1e-6;
+        if(pd < MANIFEST.physicsConfig.pickupRadius*1.6){
+          d.mode='toBar';
+          const tip = clamp(state.xp/Math.max(1,state.xpNeed), 0, 1);
+          d.sx=d.x; d.sy=d.y;
+          d.tx=state.cam.x + xpBar.x + xpBar.w * tip;
+          d.ty=state.cam.y + xpBar.y + xpBar.h * 0.5;
+          d.cx=(d.sx+d.tx)*0.5;
+          d.cy=((d.sy+d.ty)*0.5) - clamp(Math.abs(d.sy-d.ty)*0.22 + 26, 26, 96);
+          d.prog=0;
+          d.dur=0.42;
+        }
+      }else{
+        d.prog = Math.min(1, (d.prog||0) + dt/Math.max(0.001,d.dur||0.42));
+        const t=d.prog, mt=1-t;
+        d.x = mt*mt*d.sx + 2*mt*t*d.cx + t*t*d.tx;
+        d.y = mt*mt*d.sy + 2*mt*t*d.cy + t*t*d.ty;
+        if(t>=1){
+          giveXp(d.value||1);
+          d.dead=true;
+        }
+      }
+      if(d.t>(d.life||16)) d.dead=true;
+    }
+
+    p.cds.slash-=dt; p.cds.dash-=dt; p.cds.arcane-=dt; p.cds.thorns-=dt; p.hitCd-=dt;
+    const scaleLv=l=>1 + Math.max(0,l-1)*0.08;
+    const atkMul = 1 + p.atkLv * COMBAT_TUNING.player.atkPerLv;
+    const SKILL_BASE_DMG = COMBAT_TUNING.skillBaseDmg * atkMul;
+    const spawnSlashRing = (center, lv, dmg, w, h) => {
+      const slashCount = Math.max(1, lv|0);
+      const base = Math.atan2(-1,0);
+      const step = (Math.PI * 2) / slashCount;
+      state.slashes = Array.from({length:slashCount}, (_, i)=>({
+        x:center.cx,y:center.cy,w,h,t:SLASH_AXE_CFG.duration,life:SLASH_AXE_CFG.duration,dmg,
+        phase:Math.random()*10,lv,centered:true,startAngle:base + step*i,spinDir:SLASH_AXE_CFG.spinDir,
+        radius:SLASH_AXE_CFG.radius,trail:SLASH_AXE_CFG.trailFrames
+      }));
+    };
+    if(p.skills.slash>0&&p.cds.slash<=0&&(state.slashes||[]).length===0){ const lv=p.skills.slash; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash; const c=getPlayerCenter(p); spawnSlashRing(c, lv, dmg, 140, 84); p.cds.slash=0.75/scaleLv(lv); }
+    if(p.skills.arcane>0&&p.cds.arcane<=0){
+      const lv=p.skills.arcane;
+      const count=Math.max(1,lv);
+      const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.arcane;
+      fireArcaneShot(p, dmg);
+      if(count>1) state.arcaneBurst={shotsLeft:count-1,interval:0.1,timer:0.1,dmg};
+      p.cds.arcane=1.1/scaleLv(lv);
+    }
+    if(state.arcaneBurst&&state.arcaneBurst.shotsLeft>0){
+      state.arcaneBurst.timer -= dt;
+      while(state.arcaneBurst&&state.arcaneBurst.shotsLeft>0&&state.arcaneBurst.timer<=0){
+        fireArcaneShot(p, state.arcaneBurst.dmg);
+        state.arcaneBurst.shotsLeft--;
+        state.arcaneBurst.timer += state.arcaneBurst.interval;
+      }
+      if(state.arcaneBurst&&state.arcaneBurst.shotsLeft<=0) state.arcaneBurst=null;
+    }
+    if(p.skills.dash>0&&p.cds.dash<=0){ const lv=p.skills.dash; const dashLife=0.5; const dashMaxLen=vw*COMBAT_TUNING.dash.lenBaseRatio + (lv-1)*COMBAT_TUNING.dash.lenPerLv; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.dash; const dashWidth=COMBAT_TUNING.dash.widthBase + (lv-1)*COMBAT_TUNING.dash.widthPerLv; const best=calcDashBestDir(p,dashMaxLen,dashWidth); const dir=normalizeDir(best.dir.x,best.dir.y,p.lastFacing?.x||1,p.lastFacing?.y||0); p.lastDashDir={x:dir.x,y:dir.y}; const spriteSize=COMBAT_TUNING.dash.spriteBase + (lv-1)*COMBAT_TUNING.dash.spritePerLv; const knockback=COMBAT_TUNING.dash.knockbackBase+(lv-1)*COMBAT_TUNING.dash.knockbackPerLv; const knockbackDur=COMBAT_TUNING.dash.knockbackDurBase+(lv-1)*COMBAT_TUNING.dash.knockbackDurPerLv; state.dashFx.push({startX:p.x,startY:p.y,dirX:dir.x,dirY:dir.y,t:dashLife,life:dashLife,dmg,maxLen:dashMaxLen,width:dashWidth,spriteSize,knockback,knockbackDur}); state.dashAimDebug.bestHit=best.count|0; state.dashAimDebug.bestDeg=((Math.atan2(dir.y,dir.x)*180/Math.PI+360)%360); p.cds.dash=2.2/scaleLv(lv); }
+
+    for(let i=0;i<(state.enemies||[]).length;i++){ const e = state.enemies[i]; safeClampSpeed(e); const knocked=(e.dashKnockbackUntil||0)>(state.time||0);
+      const d=dist(e.x,e.y,p.x,p.y); const a=Math.atan2(p.y-e.y,p.x-e.x);
+      if(!knocked){
+      if(e.flying){ e.x+=Math.cos(a)*FLYING_SPEED*dt; e.y+=Math.sin(a)*FLYING_SPEED*dt; }
+      else if(e.ranged){ const ideal=220; let ax=0,ay=0; if(d>ideal+20){ax=(p.x-e.x)/Math.max(COLLISION_SAFE.EPS,d);ay=(p.y-e.y)/Math.max(COLLISION_SAFE.EPS,d);} else if(d<ideal-20){ax=(e.x-p.x)/Math.max(COLLISION_SAFE.EPS,d);ay=(e.y-p.y)/Math.max(COLLISION_SAFE.EPS,d);} e.x+=ax*p.speed*0.4*dt; e.y+=ay*p.speed*0.4*dt; e.shoot-=dt; if(e.shoot<=0){const bs=180; e.shoot=e.attackCd||COMBAT_TUNING.enemy.ranged.bulletInterval; state.enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(a)*bs,vy:Math.sin(a)*bs,speed:bs,ox:e.x,oy:e.y,dmg:e.bulletDmg||COMBAT_TUNING.enemy.ranged.bulletDmg,homingLeft:0.5,homingStrength:8});}}
+      else if(e.heavy){ e.heavyAttackCd=Math.max(0,(e.heavyAttackCd||0)-dt); if((e.attackAnimUntil||0)<=(state.time||0)){ e.x+=Math.cos(a)*p.speed*0.4*dt; e.y+=Math.sin(a)*p.speed*0.4*dt; } }
+      else { if((e.attackAnimUntil||0)<=(state.time||0)){ e.x+=Math.cos(a)*p.speed*0.5*dt; e.y+=Math.sin(a)*p.speed*0.5*dt; } }
+      }
+      e.x=safeFinite(e.x,0); e.y=safeFinite(e.y,0);
+      if(e.flying){
+        e.flyingAttackCd=Math.max(0,(e.flyingAttackCd||0)-dt);
+        if(meleePlayerInRange(e,p)&&(e.flyingAttackCd||0)<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.flying.contactDmg; p.hitCd=0.2; } e.flyingAttackCd=e.attackCd||COMBAT_TUNING.enemy.flying.attackCd; (state.flyingClawFx=state.flyingClawFx||[]).push(spawnFlyingClawFx(e.x,e.y)); }
+      }else if(e.heavy){
+        if(enemyInMeleeAttackZone(e,p)&&(e.heavyAttackCd||0)<=0&&(e.attackAnimUntil||0)<=(state.time||0)){ e.heavyAttackCd=e.attackCd||COMBAT_TUNING.enemy.heavy.attackCd; e.attackAnimUntil=Math.max((e.attackAnimUntil||0),(state.time||0)+HEAVY_ATTACK_DUR); e.heavyDamageDealt=false; (state.heavyExplosions=state.heavyExplosions||[]).push(spawnHeavyExplosion(e)); if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84); p.cds.thorns=0.35; } }
+        const heavyInAnim=(e.attackAnimUntil||0)>(state.time||0);
+        const heavyLatterHalf=heavyInAnim&&((e.attackAnimUntil||0)-(state.time||0))<=HEAVY_ATTACK_DUR*0.5;
+        if(heavyLatterHalf&&!e.heavyDamageDealt&&enemyInMeleeAttackZone(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.heavy.contactDmg; p.hitCd=0.45; } e.heavyDamageDealt=true; }
+      }else if(!e.ranged&&!e.flying){
+        e.meleeAttackCd=Math.max(0,(e.meleeAttackCd||0)-dt);
+        if(meleePlayerInRange(e,p)&&(e.meleeAttackCd||0)<=0&&(e.attackAnimUntil||0)<=(state.time||0)){ e.meleeAttackCd=e.attackCd||COMBAT_TUNING.enemy.melee.attackCd; e.attackAnimUntil=Math.max((e.attackAnimUntil||0),(state.time||0)+0.5); e.meleeDamageDealt=false; }
+        const inAnim=(e.attackAnimUntil||0)>(state.time||0), latterHalf=inAnim&&((e.attackAnimUntil||0)-(state.time||0))<=0.25;
+        if(latterHalf&&!e.meleeDamageDealt&&meleePlayerInRange(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.melee.contactDmg; p.hitCd=0.45; } e.meleeDamageDealt=true; if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84); p.cds.thorns=0.35; } }
+      }
+      if(performance.now()-frameStart > COLLISION_SAFE.WATCHDOG_BUDGET_MS){ skipHeavyCollision=true; collDiag.watchdogTrips++; break; }
+    }
+
+    if(!skipHeavyCollision){
+      separateEnemyPairs(state.enemies);
+    } else {
+      collDiag.skippedHeavy++;
+    }
+
+    for(const b of (state.enemyBullets||[])){ if((b.homingLeft||0)>0){ b.homingLeft=Math.max(0,b.homingLeft-dt); const toPx=p.x-b.x, toPy=p.y-b.y; const dlen=Math.hypot(toPx,toPy)||1e-6; const tx=toPx/dlen, ty=toPy/dlen; const sp=b.speed||Math.hypot(b.vx,b.vy)||180; const cvx=b.vx/(sp||1), cvy=b.vy/(sp||1); const steer=clamp((b.homingStrength||8)*dt,0,0.28); let nx=cvx+(tx-cvx)*steer, ny=cvy+(ty-cvy)*steer; const nlen=Math.hypot(nx,ny)||1e-6; nx/=nlen; ny/=nlen; b.vx=nx*sp; b.vy=ny*sp; } b.x+=b.vx*dt; b.y+=b.vy*dt; if(dist(b.x,b.y,b.ox,b.oy)>PERF.BULLET_RANGE) b.dead=true; const bh=12; if(overlap({x:b.x-bh/2,y:b.y-bh/2,w:bh,h:bh},hbBottomThird(p))){ if(!tryBlockDamage(p)){ p.hp-=b.dmg; } b.dead=true; } }
+    for(const s of (state.slashes||[])){
+      s.t-=dt;
+      s.hitEnemies=s.hitEnemies||new Set();
+      const slashLv=s.lv||p.skills.slash;
+      const c = getPlayerCenter(p);
+      s.spinCx = c.cx; s.spinCy = c.cy;
+      const slashHitbox = getSlashHitbox(s, p);
+      for(const e of (state.enemies||[])){
+        if(s.hitEnemies.has(e)) continue;
+        if(!overlap(slashHitbox, hbBottomThird(e))) continue;
+        const ex=e.x-c.cx, ey=e.y-c.cy;
+        s.hitEnemies.add(e);
+        const pre=e.hp; e.hp-=s.dmg; const dealt=Math.max(0,Math.min(pre,s.dmg)); const heal=Math.max(0.5,dealt*p.lifeSteal); p.hp=Math.min(p.maxHp,p.hp+heal);
+        const slv=Math.max(1,slashLv|0);
+        const kpow=120 + slv*18;
+        const dlen=Math.hypot(ex,ey)||1e-6;
+        const nx=ex/dlen, ny=ey/dlen;
+        e.vx=(e.vx||0)+nx*kpow;
+        e.vy=(e.vy||0)+ny*kpow;
+        e.dashKnockbackUntil=Math.max((e.dashKnockbackUntil||0),(state.time||0)+(0.12+slv*0.008));
+        (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('slash', e.x,e.y));
+      }
+    }
+    for(const pr of (state.proj||[])){ applyOrbHoming(pr, dt); pr.x+=pr.vx*dt; pr.y+=pr.vy*dt; for(const e of (state.enemies||[])){ if(overlap(getArcaneOrbHitbox(pr),hbBottomThird(e))){ const pre=e.hp; e.hp-=pr.dmg; const dealt=Math.max(0,Math.min(pre,pr.dmg)); p.hp=Math.min(p.maxHp,p.hp+Math.max(0.5,dealt*p.lifeSteal)); (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('arcane', e.x, e.y)); pr.dead=true; break; } } }
+    for(const d of (state.dashFx||[])){
+      d.t-=dt;
+      const dashBoxes = getDashStampHitboxes(d);
+      for(const e of (state.enemies||[])){
+        if(e.flying) continue; // dash does not affect flying units
+        const eb=hbBottomThird(e);
+        let hit=false;
+        for(const hb of dashBoxes){ if(overlap(hb, eb)){ hit=true; break; } }
+        if(!hit) continue;
+        if(!(d.hitEnemies||(d.hitEnemies=new Set())).has(e)){ d.hitEnemies.add(e); e.hp-=d.dmg; const kb=d.knockback||MANIFEST.physicsConfig.knockback; e.vx=(e.vx||0)+d.dirX*kb; e.vy=(e.vy||0)+d.dirY*kb; e.x+=d.dirX*14; e.y+=d.dirY*14; e.dashKnockbackUntil=(state.time||0)+(d.knockbackDur||0.2); (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('dash', e.x, e.y)); }
+      }
+    }
+    for(const hx of (state.heavyExplosions||[])){ hx.t-=dt; }
+    for(const cf of (state.flyingClawFx||[])){ cf.t-=dt; for(const pt of (cf.particles||[])){ pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.age+=dt; } }
+    for(const sf of (state.spikeFx||[])){ sf.t-=dt; for(const pt of (sf.particles||[])){ pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.age+=dt; } }
+    for(const bf of (state.blockFx||[])){ bf.t-=dt; for(const pt of (bf.particles||[])){ pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.age+=dt; } }
+    for(const fx of (state.xpFlyFx||[])){ fx.x+=safeFinite((fx.vx||0)*dt,0); fx.y+=safeFinite((fx.vy||0)*dt,0); fx.age=(fx.age||0)+dt; }
+    state.enemyBullets=(state.enemyBullets||[]).filter(b=>!b.dead); state.slashes=(state.slashes||[]).filter(s=>s&&s.t>0); state.proj=(state.proj||[]).filter(pj=>pj&&!pj.dead); state.dashFx=(state.dashFx||[]).filter(d=>d&&d.t>0); state.heavyExplosions=(state.heavyExplosions||[]).filter(h=>h&&h.t>0); state.flyingClawFx=(state.flyingClawFx||[]).filter(c=>c&&c.t>0); state.spikeFx=(state.spikeFx||[]).filter(c=>c&&c.t>0); state.blockFx=(state.blockFx||[]).filter(c=>c&&c.t>0); state.xpDrops=(state.xpDrops||[]).filter(d=>!d.dead); state.xpFlyFx=(state.xpFlyFx||[]).filter(f=>(f.age||0)<(f.life||0.25));
+    state.enemies=(state.enemies||[]).filter(e=>{ if(e.hp<=0){ if(e.gifEl){ e.gifEl.remove(); e.gifEl=null; } state.kills++; state.combo++; const cls=e.enemyClass||'melee'; if(state.killStats&&state.killStats[cls]!=null) state.killStats[cls]++; spawnXpDropsFromEnemy(e); return false;} return true;});
+    state.regenTick+=dt; if(state.regenTick>=0.5){ state.regenTick=0; const regen=COMBAT_TUNING.player.regenPerTick*(1+state.player.regenLv*COMBAT_TUNING.player.regenPerLv); state.player.hp=Math.min(state.player.maxHp,state.player.hp+regen); }
+    if(state.player.hp<=0){ state.player.hp=0; state.dead=true; state.paused=true; state.restartBtn={x:195,y:620,w:150,h:44}; }
+  }
+
+  function rect(x,y,w,h,c){ ctx.fillStyle=c; ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h)); }
+  function drawCross(x,y,color,size=4){
+    ctx.strokeStyle=color;
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(x-size, y); ctx.lineTo(x+size, y);
+    ctx.moveTo(x, y-size); ctx.lineTo(x, y+size);
+    ctx.stroke();
+  }
+  function drawHpBar(x, y, w, h, ratio, fillColor, bgColor='rgba(0,0,0,0.6)', borderColor='rgba(255,255,255,0.4)'){
+    const r = clamp(ratio, 0, 1);
+    rect(x, y, w, h, bgColor);
+    rect(x, y, Math.max(0, w * r), h, fillColor);
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(x)+0.5, Math.round(y)+0.5, Math.max(0, Math.round(w)-1), Math.max(0, Math.round(h)-1));
+  }
+
+  const SLASH_SPRITE_W = 144; // 1.5x slash sprite size
+  const SLASH_SPRITE_H = 144; // 1.5x slash sprite size
+  function drawAxePixel(centerX, centerY, tangentAngle, alpha){
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(this.x - barWidth2 / 2, this.y - this.height / 2 - 15, barWidth2, barHeight2);
-    ctx.fillStyle = this.bossType === "boss1" ? '#ff4040' : (this.bossType === "boss2" ? '#444' : '#ffd700');
-    ctx.fillRect(this.x - barWidth2 / 2 + 1, this.y - this.height / 2 - 14, (barWidth2 - 2) * clamp(this.hp / this.hpMax, 0, 1), barHeight2 - 2);
+    ctx.translate(centerX, centerY);
+    ctx.rotate(tangentAngle);
+    ctx.globalAlpha = alpha;
+    if(imgSlash.complete && imgSlash.naturalWidth){
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(imgSlash, -SLASH_SPRITE_W/2, -SLASH_SPRITE_H/2, SLASH_SPRITE_W, SLASH_SPRITE_H);
+    } else {
+      rect(-10, -2, 14, 4, '#7a5a3a');
+      rect(2, -6, 8, 12, '#d9dde5');
+      rect(8, -5, 5, 10, '#b5bdc9');
+      rect(-12, -1, 3, 2, '#b08a62');
+    }
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
-}
 
-// 敌机子弹
-class EnemyBullet {
-  constructor(kind, x, y, vx, vy, damage, spriteId, logicSize) {
-    this.kind = kind;     // "low" / "mid" / "boss_normal" ...
-    this.x = x;
-    this.y = y;
-    this.vx = vx;
-    this.vy = vy;
-    this.damage = damage;
-    this.alive = true;
-    this.spriteId = spriteId;
-    this.width = logicSize.width;
-    this.height = logicSize.height;
-    this.angleRad = Math.atan2(vy, vx);
-    // boss3 子弹追踪时间：0.5秒后沿切线方向直线射出
-    this.trackingTimer = (kind === "boss3_gold") ? 0.5 : 0.5;
-    this.rot = 0; 
+  function drawSlashFx(s, ox, oy){
+    const p = state.player;
+    const pose = getSlashPose(s, p);
+    drawAxePixel(pose.ax + ox, pose.ay + oy, pose.tangent, 1);
   }
-  update(dt) {
-    if ((this.kind === "boss_track" || this.kind === "mid" || this.kind === "boss3_gold") && this.trackingTimer > 0) {
-      this.trackingTimer -= dt;
-      if (player && player.isAlive) {
-        const dx = player.x - this.x;
-        const dy = player.y - this.y;
-        const targetAngle = Math.atan2(dy, dx);
-        const maxTurn = (this.kind === "boss3_gold" ? Math.PI : Math.PI / 2) * dt; 
-        let diff = normalizeAngle(targetAngle - this.angleRad);
-        diff = clamp(diff, -maxTurn, maxTurn);
-        this.angleRad = normalizeAngle(this.angleRad + diff);
-        const speed = Math.hypot(this.vx, this.vy);
-        this.vx = Math.cos(this.angleRad) * speed;
-        this.vy = Math.sin(this.angleRad) * speed;
-      }
-    }
 
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
-    this.rot += Math.PI * 4 * dt;
+  function drawArcaneFx(pr, ox, oy){
+    const p = 1 - (pr.t/Math.max(0.001,pr.life||0.7));
+    const f = (p*4)|0;
+    const jx = Math.sin((state.time*30)+(pr.seed||0))*2;
+    const jy = Math.cos((state.time*26)+(pr.seed||0))*2;
+    const x = pr.x + ox + jx, y = pr.y + oy + jy;
 
-    if (this.x + this.width / 2 < -100 ||
-      this.x - this.width / 2 > GAME_WIDTH + 100 ||
-      this.y + this.height / 2 < -100 ||
-      this.y - this.height / 2 > GAME_HEIGHT + 100
-    ) {
-      this.alive = false;
-    }
+    // START - Modification 2: Replace pixel art with image and rotate
+    const angle = Math.atan2(pr.vy, pr.vx); // Calculate rotation based on velocity
 
-    if (this.spriteId && this.kind.startsWith("boss")) {
-      getSprite(this.spriteId).update(dt);
-    }
-  }
-  draw(ctx) {
-    if (this.kind === "boss2_black") {
-      ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.rotate(this.angleRad + Math.PI/2);
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = "#000";
-      // 细长的椭圆形
-      ctx.fillStyle = "#222";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, this.width/4, this.height/2, 0, 0, Math.PI*2);
-      ctx.fill();
-      // 闪烁的闪电粒子特效
-      ctx.strokeStyle = "#444";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      let py = -this.height/2;
-      ctx.moveTo(0, py);
-      while(py < this.height/2) {
-        py += 5 + Math.random()*10;
-        ctx.lineTo((Math.random()-0.5)*this.width/2, py);
-      }
-      ctx.stroke();
-      ctx.restore();
-    } else if (this.kind === "boss3_gold") {
-      ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.rotate(this.angleRad + Math.PI/2);
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = "#ffd700";
-      // 细长的椭圆形
-      ctx.fillStyle = "#ffcc00";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, this.width/4, this.height/2, 0, 0, Math.PI*2);
-      ctx.fill();
-      // 闪烁的闪电粒子特效
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      let py = -this.height/2;
-      ctx.moveTo(0, py);
-      while(py < this.height/2) {
-        py += 5 + Math.random()*10;
-        ctx.lineTo((Math.random()-0.5)*this.width/2, py);
-      }
-      ctx.stroke();
-      ctx.restore();
-    } else if (this.kind === "mid") {
-      ctx.save();
-      const radius = Math.max(this.width, this.height) * 1.5;
-      ctx.shadowBlur = 30;
-      ctx.shadowColor = "#0000ff";
-      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, radius);
-      grad.addColorStop(0, "#ffffff");
-      grad.addColorStop(0.3, "#0000ff");
-      grad.addColorStop(0.6, "#000088");
-      grad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    } else if (this.kind === "low") {
-      // 浅蓝色的长条闪电粒子特效
-      ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.rotate(this.angleRad + Math.PI/2);
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = "#add8e6";
-      ctx.beginPath();
-      ctx.moveTo(0, -this.height);
-      ctx.lineTo((Math.random()-0.5)*8, 0);
-      ctx.lineTo(0, this.height);
-      ctx.strokeStyle = "#e0ffff";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      if (Math.random() > 0.5) {
-         ctx.beginPath();
-         ctx.moveTo((Math.random()-0.5)*15, -this.height);
-         ctx.lineTo((Math.random()-0.5)*15, this.height);
-         ctx.strokeStyle = "rgba(255,255,255,0.8)";
-         ctx.lineWidth = 1;
-         ctx.stroke();
-      }
-      ctx.restore();
-    } else if (this.kind === "boss_normal") {
-      ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = "#ff0000";
-      ctx.beginPath();
-      ctx.moveTo(0, -this.height/2);
-      ctx.lineTo((Math.random()-0.5)*30, -this.height/6);
-      ctx.lineTo((Math.random()-0.5)*30, this.height/6);
-      ctx.lineTo(0, this.height/2);
-      ctx.strokeStyle = "#ff3333";
-      ctx.lineWidth = 8;
-      ctx.stroke();
-      ctx.restore();
-    } else if (this.kind === "boss_track") {
-        ctx.save();
-        ctx.translate(this.x, this.y);
-        ctx.rotate(this.rot);
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = "#ff0000";
-        const r = this.width / 2;
-        ctx.beginPath();
-        for(let i=0; i<3; i++) {
-            const ang = (i * Math.PI * 2) / 3 - Math.PI/2;
-            const tx = Math.cos(ang) * r;
-            const ty = Math.sin(ang) * r;
-            if(i===0) ctx.moveTo(tx, ty);
-            else ctx.lineTo(tx, ty);
-        }
-        ctx.closePath();
-        ctx.strokeStyle = "#ff0000";
-        ctx.lineWidth = 6;
-        ctx.stroke();
-        ctx.restore();
-    } else if (this.kind === "boss_spread") {
-        ctx.save();
-        ctx.translate(this.x, this.y);
-        const radius = this.width / 2;
-        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
-        grad.addColorStop(0, "#ffffff");
-        grad.addColorStop(0.4, "#ff0000");
-        grad.addColorStop(1, "rgba(255, 0, 0, 0)");
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, 0, Math.PI*2);
-        ctx.fill();
-        ctx.restore();
+    ctx.save(); // Save current canvas state
+    ctx.translate(x, y); // Move origin to orb center
+
+    // The user states "奥数弹的方向是竖直向下的，要与奥数弹的飞行方向对齐".
+    // Assuming the image `player_sl_2.png` naturally points downwards (along its local +Y axis).
+    // `Math.atan2(vy, vx)` gives the angle from the positive X-axis (right).
+    // To align the image\'s natural downward direction (local +Y, which is PI/2 from local +X) with the velocity angle,
+    // we need to apply a rotation of `angle - PI/2`.
+    ctx.rotate(angle - Math.PI / 2); // Rotate to align with velocity.
+
+    const playerSize = MANIFEST.assets.Victor.logicSize.width; // 128
+    const orbScale = playerSize / 6 * 4; // 奥数弹大小为玩家的 1/6 的 4 倍
+    const imgWidth = 16 * (orbScale / 32);  // 图片 16x32，按比例缩放使高=orbScale
+    const imgHeight = orbScale;
+
+    if (arcaneOrbImg.complete && arcaneOrbImg.naturalWidth > 0) {
+      // Draw the image centered around the new origin (x, y)
+      ctx.drawImage(arcaneOrbImg, -imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight);
     } else {
-      const sprite = getSprite(this.spriteId);
-      sprite.draw(ctx, this.x, this.y);
+      // Fallback to original pixel drawing if image not loaded or failed
+      const core = ([6,7,5,4][Math.min(3,f)]) * orbScale / 16;
+      rect(-core/2, -core/2, core, core,'#7ef'); // main body
+      rect(-core, -orbScale/8, core*2, orbScale/4,'rgba(120,220,255,0.8)'); // horizontal glow
+      if(f>=1) rect(-orbScale/8, -core, orbScale/4, core*2,'rgba(180,240,255,0.8)'); // vertical glow
+      if(f>=2) rect(-core-orbScale/4, -core-orbScale/4, orbScale*3/8, orbScale*3/8,'rgba(80,140,255,0.8)'); // corner 1
+      if(f>=3) rect(core-orbScale/8, core-orbScale/8, orbScale*3/8, orbScale*3/8,'rgba(210,250,255,0.9)'); // corner 2
     }
-  }
-}
 
-// 掉落物
-class Item {
-  constructor(kind, x, y, source) {
-    this.kind = kind;
-    this.x = x;
-    this.y = y;
-    this.vx = 0;
-    this.vy = phys.dropSpeed;
-    this.alive = true;
-    this.source = source;
-    const logicSize = GameManifest.entities.items.attackReward.logicSize;
-    this.width = logicSize.width;
-    this.height = logicSize.height;
-    this.spriteId = kind === "attack" ? GameManifest.entities.items.attackReward.assetId : GameManifest.entities.items.hpReward.assetId;
+    ctx.restore(); // Restore canvas state
+    // END - Modification 2
   }
-  update(dt) {
-    this.y += this.vy * dt;
-    if (this.y - this.height / 2 > GAME_HEIGHT) this.alive = false;
-    getSprite(this.spriteId).update(dt);
-  }
-  draw(ctx) {
-    getSprite(this.spriteId).draw(ctx, this.x, this.y);
-  }
-}
 
-// 一次性特效
-class OneShotFx {
-  constructor(x, y, spriteId, logicSize, duration, onEnd, followTarget = null) {
-    this.x = x;
-    this.y = y;
-    this.spriteId = spriteId;
-    this.width = logicSize.width;
-    this.height = logicSize.height;
-    this.duration = duration;
-    this.timer = 0;
-    this.alive = true;
-    this.onEnd = onEnd || null;
-    this.gifEl = null;
-    this.currentGifAssetId = null;
-    this.followTarget = followTarget; // 可选的跟随目标（如玩家对象）
+  function drawMeleeAttackFx(m, ox, oy){
+    const x=m.x+ox, y=m.y+oy;
+    const angle=Math.atan2(m.dirY,m.dirX);
+    const sz=72;
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(angle);
+    const phase=1-(m.t/(m.life||0.35));
+    ctx.globalAlpha=phase<0.2?phase/0.2:phase>0.8?(1-phase)/0.2:1;
+    if(meleeAttackImg.complete&&meleeAttackImg.naturalWidth>0){
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(meleeAttackImg,-sz/2,-sz/2,sz,sz);
+    }else{ rect(-18,-18,36,36,'rgba(180,100,80,0.8)'); }
+    ctx.restore();
   }
-  update(dt) {
-    // 如果有跟随目标，更新位置以跟随目标
-    if (this.followTarget && this.followTarget.isAlive) {
-      this.x = this.followTarget.x;
-      this.y = this.followTarget.y;
+  function drawHeavyExplosionFx(hx, ox, oy){
+    const life=(hx.life||HEAVY_ATTACK_DUR||0.5);
+    const p=1-Math.max(0,(hx.t||0)/life);
+    if(p<0||p>1) return;
+    const cells=Array.isArray(hx.cells)?hx.cells:[];
+    if(!cells.length) return;
+    const alpha=1-p;
+    ctx.save();
+    for(const c of cells){
+      const flame=Math.sin((state.time*18)+(c.seed||0))*0.5+0.5;
+      const front = p<0.5 ? (p/0.5) : 1;
+      if(p<0.5 && flame<0.72) continue; // sparser flames in first half
+      const h=Math.floor(c.s*(0.45+flame*0.45)*(0.75+front*0.35));
+      const baseX=c.x+ox;
+      const baseY=c.y+oy+(c.s-h);
+      ctx.fillStyle=`rgba(170,40,12,${(0.28+0.35*front)*alpha})`;
+      rect(baseX, baseY, c.s, h);
+      ctx.fillStyle=`rgba(245,120,26,${(0.36+0.36*front)*alpha})`;
+      rect(baseX+1, baseY+1, Math.max(1,c.s-2), Math.max(1,h-2));
+      if(flame>0.6){
+        ctx.fillStyle=`rgba(255,228,120,${(0.28+0.5*front)*alpha})`;
+        rect(baseX+2, baseY+2, Math.max(1,c.s-4), Math.max(1,h*0.45));
+      }
     }
-    
-    this.timer += dt;
-    getSprite(this.spriteId).update(dt);
-    if (this.timer >= this.duration) {
-      this.alive = false;
-      if (this.gifEl) { this.gifEl.remove(); this.gifEl = null; }
-      if (this.onEnd) this.onEnd();
+    ctx.restore();
+  }
+  function drawHeavyAttackFx(h, ox, oy){
+    const x=h.x+ox, y=h.y+oy;
+    const angle=Math.atan2(h.dirY,h.dirX);
+    const sz=96;
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(angle);
+    const phase=1-(h.t/(h.life||0.4));
+    ctx.globalAlpha=phase<0.2?phase/0.2:phase>0.8?(1-phase)/0.2:1;
+    if(heavyAttackImg.complete&&heavyAttackImg.naturalWidth>0){
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(heavyAttackImg,-sz/2,-sz/2,sz,sz);
+    }else{ rect(-24,-24,48,48,'rgba(200,80,60,0.8)'); }
+    ctx.restore();
+  }
+  function drawEnemyBulletFx(b, ox, oy){
+    const x = b.x + ox, y = b.y + oy;
+    const angle = Math.atan2(b.vy, b.vx);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle - Math.PI / 2);
+    const bulletScale = COMBAT_TUNING.visual.rangedBulletScale;
+    const imgW = 16 * (bulletScale / 32), imgH = bulletScale;
+    if(enemyAttackImg.complete && enemyAttackImg.naturalWidth > 0){
+      ctx.drawImage(enemyAttackImg, -imgW/2, -imgH/2, imgW, imgH);
+    } else {
+      rect(-3,-3,6,6,'#ffdd55');
     }
+    ctx.restore();
   }
-  draw(ctx) {
-    if (!syncEntityGif(this, this.spriteId)) {
-      getSprite(this.spriteId).draw(ctx, this.x, this.y);
+  function drawActorShadow(x, y, w, h, alpha=0.26){
+    ctx.save();
+    ctx.fillStyle=`rgba(0,0,0,${alpha})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y + h*0.38, w*0.28, h*0.12, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function getEnemyTypeIndex(e){ if(e.heavy) return 2; if(e.flying) return 3; if(e.ranged) return 1; return 0; }
+
+  const DASH_SPRITE_SZ = 48;
+  const DASH_SPRITE_CYCLE = 0.5;
+  const DASH_SPRITE_INTERVAL = 0.1/1.5;
+  function drawThrustFx(d, ox, oy){
+    const life = d.life||0.5, maxLen = d.maxLen||360;
+    const progress = 1 - (d.t/Math.max(0.001,life));
+    const currLen = progress * maxLen;
+    const timeElapsed = progress * life;
+    const gap = maxLen * DASH_SPRITE_INTERVAL / life;
+    const count = Math.max(1, Math.floor(currLen / gap));
+    const sx = d.startX + ox, sy = d.startY + oy;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for(let i = 0; i < count; i++){
+      const age = timeElapsed - i * DASH_SPRITE_INTERVAL;
+      if(age < 0) continue;
+      const phase = Math.min(1, age / DASH_SPRITE_CYCLE);
+      let scale = 1, alpha = 1, offsetY = 0;
+      if(phase < 0.33){
+        const p = phase / 0.33;
+        scale = p;
+        alpha = p;
+        offsetY = (1 - p) * 24;
+      } else if(phase < 0.66){
+        scale = 1;
+        alpha = 1;
+      } else {
+        const p = (phase - 0.66) / 0.34;
+        alpha = 1 - p;
+        scale = 1 - p * 0.3;
+      }
+      if(alpha <= 0) continue;
+      const dist = (i + 0.5) * gap;
+      const px = sx + d.dirX * dist;
+      const py = sy + d.dirY * dist;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.translate(0, offsetY);
+      ctx.globalAlpha = alpha;
+      const baseSpriteSize = d.spriteSize || DASH_SPRITE_SZ;
+      const sz = baseSpriteSize * scale;
+      if(imgDashThrust.complete && imgDashThrust.naturalWidth > 0){
+        ctx.drawImage(imgDashThrust, -sz/2, -sz/2, sz, sz);
+      } else {
+        rect(-sz/4, -sz/4, sz/2, sz/2, 'rgba(255,170,140,0.9)');
+      }
+      ctx.restore();
     }
-  }
-}
-
-/* ======== 掉落辅助 ======== */
-function spawnAttackReward(x, y, source = "global") {
-  items.push(new Item("attack", x, y, source));
-}
-function spawnHpReward(x, y, source) {
-  items.push(new Item("hp", x, y, source));
-}
-
-/* ======== 敌机生成 & 波次逻辑 ======== */
-function spawnLowEnemy() {
-  const cfg = GameManifest.entities.enemies.low.logicSize;
-  const x = cfg.width / 2 + Math.random() * (GAME_WIDTH - cfg.width);
-  const y = -cfg.height;
-  enemies.push(new Enemy("low", x, y));
-}
-function spawnMidEnemy() {
-  const cfg = GameManifest.entities.enemies.mid.logicSize;
-  const x = cfg.width / 2 + Math.random() * (GAME_WIDTH - cfg.width);
-  const y = -cfg.height;
-  enemies.push(new Enemy("mid", x, y));
-}
-
-function updateSpawns(dt) {
-  if (bossSpawned) return;
-  spawnTickTimer -= dt;
-  if (spawnTickTimer <= 0) {
-    spawnTickTimer += spawnTickInterval;
-    doSpawnTick();
+    ctx.restore();
   }
 
-  if (!bossSpawned && lowKilled === 10 && midKilled === 5 && enemies.length === 0) {
-    boss = new Boss("boss1");
-    bossSpawned = true;
-  }
-}
-
-function doSpawnTick() {
-  if (lowKilled < 5) {
-    if (lowSpawned < 10) { spawnLowEnemy(); lowSpawned++; }
-    return;
-  }
-  const needLow = lowSpawned < 10;
-  const needMid = midSpawned < 5;
-  if (!needLow && !needMid) return;
-  const totalSpawned = lowSpawned + midSpawned;
-  if (totalSpawned % 2 === 0) {
-    if (needLow) { spawnLowEnemy(); lowSpawned++; } else if (needMid) { spawnMidEnemy(); midSpawned++; }
-  } else {
-    if (needMid) { spawnMidEnemy(); midSpawned++; } else if (needLow) { spawnLowEnemy(); lowSpawned++; }
-  }
-}
-
-/* ======== 死亡回调 ======== */
-function onEnemyDead(enemy) {
-  if (enemy.type === "low") {
-    lowKilled++;
-    if (globalAttackRewardStage === 0) { globalAttackRewardStage = 1; spawnAttackReward(enemy.x, enemy.y); }
-  } else if (enemy.type === "mid") {
-    midKilled++;
-    if (globalAttackRewardStage === 1) { globalAttackRewardStage = 2; spawnAttackReward(enemy.x, enemy.y); }
-    if (!globalHPRewardDropped_mid) { globalHPRewardDropped_mid = true; spawnHpReward(enemy.x, enemy.y, "mid"); }
-  }
-}
-
-function onPlayerDead() {
-  gameState = GameStateEnum.GAME_OVER;
-  overlayGameOver.style.display = "block";
-  overlayMenu.style.display = "none";
-  gameOverDesc.textContent = "玩家被击毁。";
-}
-
-function onBossDead(deadBoss) {
-  if (currentBossWave === 1) {
-    // Boss 1 死亡，触发 Boss 2 和 Boss 3 同时出现
-    currentBossWave = 2;
-    boss = null;
-    bosses = [new Boss("boss2"), new Boss("boss3")];
-    console.log("Boss 1 击败，双 Boss 出现！");
-  } else {
-    // Boss 2/3 死亡逻辑
-    // boss2、boss3血条都清空时游戏胜利
-    bosses = bosses.filter(b => b !== deadBoss);
-    if (bosses.length === 0) {
-      // 所有 Boss（boss2 和 boss3）都被击败，游戏胜利
-      gameState = GameStateEnum.GAME_OVER;
-      overlayGameOver.style.display = "block";
-      overlayMenu.style.display = "none";
-      gameOverDesc.textContent = "恭喜！你击败了所有强敌，获得最终胜利！";
+  function render(){
+    const ox=-state.cam.x, oy=-state.cam.y;
+    backCtx.fillStyle='#0d0f14'; backCtx.fillRect(0,0,vw,vh);
+    const T=120; const sx=Math.floor(state.cam.x/T)*T; const sy=Math.floor(state.cam.y/T)*T;
+    for(let y=sy;y<state.cam.y+vh+T;y+=T) for(let x=sx;x<state.cam.x+vw+T;x+=T){
+      const gx=Math.floor(x/T), gy=Math.floor(y/T);
+      const h=((gx*2654435761)^(gy*2246822519))>>>0;
+      const use01=(h%100)<70;
+      const img=use01?imgTile01:imgTile02;
+      if(img.complete&&img.naturalWidth) backCtx.drawImage(img,x+ox,y+oy,T,T);
+      else{ backCtx.fillStyle=use01?'#141821':'#10131a'; backCtx.fillRect(x+ox,y+oy,T-2,T-2); }
     }
-  }
-}
+    // hide landmark blocks to keep battlefield clean
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,frontCanvas.width,frontCanvas.height); ctx.restore();
+    const p=state.player;
+    if(state.showCollBox){ const ph=hbBottomThird(p); rect(ph.x+ox,ph.y+oy,ph.w,ph.h,'rgba(0,255,255,0.25)'); }
+    for(const e of (state.enemies||[])) drawActorShadow(e.x+ox, e.y+oy, e.w, e.h, 0.24);
+    for(const e of (state.enemies||[])){
+      const idx=getEnemyTypeIndex(e);
+      const faceRight=p.x>e.x;
+      const inAttack = (e.heavy || (!e.ranged && !e.flying)) && (e.attackAnimUntil||0)>(state.time||0);
+      if(inAttack){
+        const fs=e.heavy?heavyAttackFrames:meleeAttackFrames;
+        if(fs.ready&&fs.frameCount>0){
+          const dur=e.heavy?HEAVY_ATTACK_DUR:0.5;
+          const elapsed=Math.max(0,dur-((e.attackAnimUntil||0)-(state.time||0)));
+          const frameIdx=Math.min(Math.floor(elapsed/dur*fs.frameCount),fs.frameCount-1);
+          const bm=fs.frames[Math.max(0,frameIdx)];
+          if(bm){
+            ctx.save();
+            ctx.imageSmoothingEnabled=false;
+            const x=e.x+ox,y=e.y+oy;
+            ctx.translate(x,y);
+            ctx.scale(faceRight?1:-1,1);
+            ctx.drawImage(bm,-e.w/2,-e.h/2,e.w,e.h);
+            ctx.restore();
+            if(e.gifEl) e.gifEl.style.display='none';
+          }else{
+            // Fallback when decoded frame is missing: keep attack gif visible.
+            syncEnemyGif(e,idx,ox,oy,faceRight, e.heavy?enemyAttackSrcs.heavy:enemyAttackSrcs.melee);
+          }
+        }else{ syncEnemyGif(e,idx,ox,oy,faceRight, e.heavy?enemyAttackSrcs.heavy:enemyAttackSrcs.melee); }
+      }else{ syncEnemyGif(e, idx, ox, oy, faceRight); }
+    }
+    for(const e of (state.enemies||[])){
+      const maxHp = Math.max(1, e.maxHp || e.hp || 1);
+      const hpRatio = (e.hp || 0) / maxHp;
+      const barW = e.heavy ? 64 : 40;
+      const barH = 5;
+      const bx = e.x + ox - barW/2;
+      const by = e.y + oy - e.h/2 - 12;
+      drawHpBar(bx, by, barW, barH, hpRatio, '#e44747');
+      ctx.fillStyle='#f5f5f5';
+      ctx.fillText(`Lv${e.enemyLv||1}`, bx, by-3);
+    }
+    if(state.showCollBox){
+      for(const e of (state.enemies||[])){ const h=hbBottomThird(e); rect(h.x+ox,h.y+oy,h.w,h.h,'rgba(255,255,255,0.2)'); }
+      for(const e of (state.enemies||[])){ if(e.heavy||(!e.ranged&&!e.flying)||e.flying) drawEnemyAttackZone(e,p,ox,oy); }
+    }
 
-/* ======== 碰撞处理 ======== */
-function handleCollisions() {
-  if (player && player.isAlive) {
-    const px = player.x - player.width / 2;
-    const py = player.y - player.height / 2;
-    const pw = player.width;
-    const ph = player.height;
-
-    for (const eb of enemyBullets) {
-      if (!eb.alive) continue;
-      if (rectsOverlap(px, py, pw, ph, eb.x - eb.width/2, eb.y - eb.height/2, eb.width, eb.height)) {
-        eb.alive = false; player.takeDamage(eb.damage);
+    if(state.showCollBox){
+      const pcb=getCollisionBox(p);
+      ctx.strokeStyle='#00ff88'; ctx.lineWidth=1; ctx.strokeRect(Math.round(pcb.x+ox),Math.round(pcb.y+oy),Math.round(pcb.w),Math.round(pcb.h));
+      for(const e of (state.enemies||[])){
+        const cb=getCollisionBox(e);
+        ctx.strokeStyle='#ffd200'; ctx.strokeRect(Math.round(cb.x+ox),Math.round(cb.y+oy),Math.round(cb.w),Math.round(cb.h));
       }
     }
 
-    for (const e of enemies) {
-      if (!e.alive) continue;
-      if (rectsOverlap(px, py, pw, ph, e.x - e.width/2, e.y - e.height/2, e.width, e.height)) {
-        e.alive = false; onEnemyDead(e); player.takeDamage(1);
+    for(const b of (state.enemyBullets||[])) drawEnemyBulletFx(b,ox,oy);
+    for(const hx of (state.heavyExplosions||[])) drawHeavyExplosionFx(hx,ox,oy);
+    for(const cf of (state.flyingClawFx||[])) drawFlyingClawFx(cf,ox,oy);
+    for(const sf of (state.spikeFx||[])) drawSpikeKnockFx(sf,ox,oy);
+    for(const bf of (state.blockFx||[])) drawBlockFx(bf,ox,oy);
+    for(const xd of (state.xpDrops||[])) drawXpDrop(xd,ox,oy);
+    for(const xf of (state.xpFlyFx||[])) drawXpFlyFx(xf,ox,oy);
+    for(const s of (state.slashes||[])) drawSlashFx(s,ox,oy);
+    for(const pr of (state.proj||[])) drawArcaneFx(pr,ox,oy);
+    for(const d of (state.dashFx||[])) drawThrustFx(d,ox,oy);
+
+    // 玩家绘制（放在最后以显示在敌人/特效之上；ImageDecoder 每轮跳过前两帧）
+    const faceLeft = (p.lastFacing && p.lastFacing.x < 0);
+    const px = p.x+ox-p.w/2, py = p.y+oy-p.h/2;
+    drawActorShadow(p.x+ox, p.y+oy, p.w, p.h, 0.28);
+    if (playerWebpState.ready && playerWebpState.frames.length > 0) {
+      const idx = Math.floor(state.time * PLAYER_WEBP_FPS) % playerWebpState.frameCount;
+      const bm = playerWebpState.frames[idx];
+      if (bm) {
+        ctx.save();
+        ctx.translate(px + p.w/2, py + p.h/2);
+        ctx.scale(faceLeft ? -1 : 1, 1);
+        ctx.translate(-(px + p.w/2), -(py + p.h/2));
+        ctx.drawImage(bm, px, py, p.w, p.h);
+        ctx.restore();
       }
+      playerGifEl.style.display = 'none';
+    } else if (playerWebpState.useImgFallback && playerGifEl.complete && playerGifEl.naturalWidth) {
+      const tx = px*scale, ty = py*scale, pw=p.w*scale, ph=p.h*scale;
+      playerGifEl.style.display = 'block';
+      playerGifEl.style.opacity = '1';
+      playerGifEl.style.width = Math.round(pw)+'px';
+      playerGifEl.style.height = Math.round(ph)+'px';
+      playerGifEl.style.transformOrigin = '50% 50%';
+      playerGifEl.style.transform = `translate(${Math.round(tx)}px,${Math.round(ty)}px) scaleX(${faceLeft?-1:1})`;
+    } else {
+      playerGifEl.style.display = 'none';
+      rect(px, py, p.w, p.h, '#3aa7ff');
     }
 
-    if (boss && boss.alive) {
-      if (rectsOverlap(px, py, pw, ph, boss.x - boss.width/2, boss.y - boss.height/2, boss.width, boss.height)) player.takeDamage(3);
-    }
-    for (const b of bosses) {
-      if (b.alive && rectsOverlap(px, py, pw, ph, b.x - b.width/2, b.y - b.height/2, b.width, b.height)) player.takeDamage(3);
+    const topBarW = 320;
+    const topBarH = 14;
+    const topBarX = (vw - topBarW) / 2;
+    const topBarY = 10;
+    drawHpBar(topBarX, topBarY, topBarW, topBarH, p.hp/Math.max(1,p.maxHp), '#36d26b');
+    const xpBar = getXpBarRect();
+    drawHpBar(xpBar.x, xpBar.y, xpBar.w, xpBar.h, state.xp/Math.max(1,state.xpNeed), '#f0be42', 'rgba(35,28,16,0.78)', 'rgba(255,230,150,0.85)');
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`HP ${Math.ceil(p.hp)}/${Math.ceil(p.maxHp)}  LV ${state.level}`, topBarX + 70, topBarY + topBarH + 14);
+    ctx.fillText(`XP ${state.xp}/${state.xpNeed}`, xpBar.x + 118, xpBar.y + xpBar.h + 14);
+
+    rect(10,10,360,178,'rgba(0,0,0,0.35)');
+    ctx.fillStyle='#fff';
+    ctx.fillText(`主动: 斩击${p.skills.slash}  突刺${p.skills.dash}  奥术弹${p.skills.arcane}`,20,68);
+    ctx.fillText(`被动: 吸血${p.lifeStealLv}  血量${p.maxHpLv}  移速${p.moveLv}`,20,88);
+    ctx.fillText(`      恢复${p.regenLv}  攻击${p.atkLv}  格挡${p.blockLv||0}`,20,106);
+    ctx.fillText(`吸血率 ${(p.lifeSteal*100).toFixed(1)}%  格挡率 ${(clamp(0.06+(p.blockLv||0)*0.022,0,0.52)*100).toFixed(1)}%`,20,126);
+    ctx.fillText(`击杀: 总${state.kills}  近${state.killStats.melee}  远${state.killStats.ranged}`,20,146);
+    ctx.fillText(`      重${state.killStats.heavy}  飞${state.killStats.flying}`,20,164);
+
+    if(isTouchDevice && !state.paused && !state.dead){
+      const bx=82, by=vh-96, br=56;
+      ctx.strokeStyle='rgba(255,255,255,0.24)';
+      ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(bx,by,br,0,Math.PI*2); ctx.stroke();
+      const kx=bx+(touchMove.dirX||0)*br, ky=by+(touchMove.dirY||0)*br;
+      ctx.fillStyle='rgba(255,255,255,0.18)';
+      ctx.beginPath(); ctx.arc(kx,ky,22,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.55)';
+      ctx.fillText('MOVE', bx-18, by+4);
     }
 
-    for (const it of items) {
-      if (!it.alive) continue;
-      if (rectsOverlap(px, py, pw, ph, it.x - it.width/2, it.y - it.height/2, it.width, it.height)) {
-        it.alive = false;
-        if (it.kind === "attack") {
-          player.upgradeAttackLevel(player.attackLevel + 1);
-          if (it.source === "boss") { player.damageMultiplier *= 1.5; player.fireRateMultiplier *= 1.5; }
-        } else {
-          if (it.source === "mid") player.heal(3); else player.healFull();
+    if(state.paused&&!state.dead){
+      rect(0,0,vw,vh,'rgba(0,0,0,0.45)');
+      ctx.fillStyle='#fff';
+      ctx.fillText('PAUSED - 选择升级(1/2/3或点击)',130,250);
+      for(let i=0;i<state.cards.length;i++){
+        const c=state.cards[i];
+        let theme='#2f2f3f';
+        if(c.opt.kind==='atk'){
+          if(c.opt.key==='slash') theme='#5d2c2c';
+          else if(c.opt.key==='dash') theme='#5b3f21';
+          else if(c.opt.key==='arcane') theme='#203d63';
+        }else{
+          if(c.opt.key==='lifeStealLv') theme='#234d2c';
+          else if(c.opt.key==='maxHpLv') theme='#3f3320';
+          else if(c.opt.key==='moveLv') theme='#1f3f3f';
+          else if(c.opt.key==='regenLv') theme='#2a4a2a';
+          else if(c.opt.key==='atkLv') theme='#4f2f1d';
+          else if(c.opt.key==='blockLv') theme='#5b5423';
+        }
+        rect(c.x,c.y,c.w,c.h,'#222');
+        rect(c.x+2,c.y+2,c.w-4,c.h-4,theme);
+        ctx.fillStyle='#fff';
+        ctx.fillText(`${i+1}. ${c.opt.name}`,c.x+10,c.y+30);
+        ctx.fillText(c.opt.kind==='atk'?'主动技能':'被动技能',c.x+10,c.y+50);
+        const lines = c.preview || [];
+        for(let li=0;li<lines.length;li++){
+          ctx.fillStyle = li===0 ? '#ffd36a' : '#d8efff';
+          ctx.fillText(lines[li], c.x+10, c.y+74+li*18);
         }
       }
     }
+    if(state.dead){ rect(80,220,380,420,'rgba(0,0,0,0.72)'); ctx.fillStyle='#fff'; ctx.fillText('YOU DIED',230,270); ctx.fillText(`击杀: ${state.kills}`,170,320); ctx.fillText(`等级: ${state.level}`,170,350); ctx.fillText(`斩击:${p.skills.slash} 突刺:${p.skills.dash} 奥术弹:${p.skills.arcane}`,170,380); const b=state.restartBtn; rect(b.x,b.y,b.w,b.h,'#7a1'); ctx.fillStyle='#fff'; ctx.fillText('RESTART (R)',b.x+28,b.y+27); }
+    ctx.fillStyle='#aaa'; ctx.fillText(`diag paused=${state.paused} dead=${state.dead}`,10,vh-10);
   }
 
-  for (const b of playerBullets) {
-    if (!b.alive) continue;
-    let hit = false;
-    for (const e of enemies) {
-      if (e.alive && rectsOverlap(b.x - b.width/2, b.y - b.height/2, b.width, b.height, e.x - e.width/2, e.y - e.height/2, e.width, e.height)) {
-        e.takeDamage(b.damage); b.alive = false; hit = true; break;
-      }
-    }
-    if (hit) continue;
-    if (boss && boss.alive && rectsOverlap(b.x - b.width/2, b.y - b.height/2, b.width, b.height, boss.x - boss.width/2, boss.y - boss.height/2, boss.width, boss.height)) {
-      boss.takeDamage(b.damage); b.alive = false;
-    }
-    for (const bb of bosses) {
-      if (bb.alive && rectsOverlap(b.x - b.width/2, b.y - b.height/2, b.width, b.height, bb.x - bb.width/2, bb.y - bb.height/2, bb.width, bb.height)) {
-        bb.takeDamage(b.damage); b.alive = false; break;
-      }
-    }
-  }
-}
+  (function bindChoiceListenersOnce(){
+    choicePerfStats.bindCount += 1;
+    if(CHOICE_DEBUG) console.log(`[choice] listeners bound count=${choicePerfStats.bindCount}`);
+  })();
 
-/* ======== 游戏状态控制 ======== */
-function startGame() {
-  gameState = GameStateEnum.PLAYING;
-  overlayMenu.style.display = "none";
-  overlayGameOver.style.display = "none";
-  document.querySelectorAll('.gif-render-element').forEach(el => el.remove());
-  const bgVideo = document.getElementById("bgVideo");
-  if (bgVideo && bgVideo.paused) bgVideo.play().catch(err => console.warn(err));
-
-  player = new Player();
-  enemies = [];
-  playerBullets = [];
-  enemyBullets = [];
-  items = [];
-  fxOneShots = [];
-  boss = null;
-  bosses = [];
-  currentBossWave = 1;
-
-  lowSpawned = 0; lowKilled = 0; midSpawned = 0; midKilled = 0;
-  bossSpawned = false; spawnTickTimer = 0;
-  globalAttackRewardStage = 0; globalHPRewardDropped_mid = false;
-  globalBossAttackDropDone = false; globalBossHpDropDone = false; bossTransformPlayed = false;
-}
-
-/* ======== 更新与渲染 ======== */
-function update(dt) {
-  if (gameState !== GameStateEnum.PLAYING) return;
-  updateSpawns(dt);
-  if (player) player.update(dt);
-  for (const e of enemies) if (e.alive) e.update(dt);
-  enemies = enemies.filter(e => { if(!e.alive && e.gifEl) e.gifEl.remove(); return e.alive; });
-  if (boss && boss.alive) boss.update(dt);
-  for (const b of bosses) if (b.alive) b.update(dt);
-  for (const b of playerBullets) if (b.alive) b.update(dt);
-  playerBullets = playerBullets.filter(b => b.alive);
-  for (const eb of enemyBullets) if (eb.alive) eb.update(dt);
-  enemyBullets = enemyBullets.filter(eb => eb.alive);
-  for (const it of items) if (it.alive) it.update(dt);
-  items = items.filter(it => it.alive);
-  for (const fx of fxOneShots) if (fx.alive) fx.update(dt);
-  fxOneShots = fxOneShots.filter(fx => { if(!fx.alive && fx.gifEl) fx.gifEl.remove(); return fx.alive; });
-  handleCollisions();
-}
-
-function drawUIOverlay() {
-  ctx.save(); ctx.fillStyle = "#fff"; ctx.font = "24px Arial";
-  ctx.fillText(player && player.isAlive ? `HP: ${player.hp}/${player.maxHP}` : "HP: 0", 20, GAME_HEIGHT - 80);
-  if (player) ctx.fillText(`攻击等级: ${player.attackLevel}`, 20, GAME_HEIGHT - 50);
-  ctx.fillText(`进度: ${lowKilled}/10 低级, ${midKilled}/5 中级`, 20, GAME_HEIGHT - 110);
-  ctx.restore();
-}
-
-function draw() {
-  ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-  for (const it of items) it.draw(ctx);
-  for (const e of enemies) e.draw(ctx);
-  if (boss && boss.alive) boss.draw(ctx);
-  for (const b of bosses) b.draw(ctx);
-  for (const b of playerBullets) b.draw(ctx);
-  for (const eb of enemyBullets) eb.draw(ctx);
-  if (player) player.draw(ctx);
-  for (const fx of fxOneShots) fx.draw(ctx);
-  drawUIOverlay();
-  stateLabel.textContent = gameState;
-}
-
-function gameLoop(timestamp) {
-  const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
-  lastTime = timestamp;
-  if (gameState === GameStateEnum.LOADING) { gameState = GameStateEnum.MENU; overlayMenu.style.display = "block"; }
-  if (gameState === GameStateEnum.PLAYING) update(dt);
-  draw();
-  requestAnimationFrame(gameLoop);
-}
-requestAnimationFrame(gameLoop);
+  requestAnimationFrame(loop);
+})();
 </script>
 </body>
 </html>
