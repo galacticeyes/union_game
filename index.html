@@ -112,13 +112,85 @@
   imgDashThrust.onload = () => { const b = getOpaqueBounds(imgDashThrust); if(b) opaqueBoundsCache.dash = b; };
   imgDashThrust.src = 'rouge_webps/player_sl_1.webp';
   imgDashThrust.onerror = function(){ if(this.src.indexOf('.png')<0) this.src='rouge_webps/player_sl_1.png'; };
-  const imgTile01 = new Image(); imgTile01.src = 'tile_01.png';
-  const imgTile02 = new Image(); imgTile02.src = 'tile_02.png';
+  const imgTilesBrown = [0,1,2,3,4].map(i => { const img = new Image(); img.src = `tile_0${i}_brown.png`; return img; });
   const PLAYER_WEBP_FPS = 12 * 0.8 * 0.8 * 0.5;
   const playerWebpState = { ready: false, frames: [], frameCount: 0, useImgFallback: false };
   const enemyAssetSrcs = ['rouge_webps/enemy_0.webp','rouge_webps/enemy_1.webp','rouge_webps/enemy_2.webp','rouge_webps/enemy_3.webp'];
   const enemyAttackSrcs = { melee: 'rouge_webps/enemy_attack_0.webp', heavy: 'rouge_webps/enemy_attack_2.webp' };
   const HEAVY_ATTACK_DUR = 1.0;
+  let audioCtx = null;
+  const footstepCooldown = { t: 0 };
+  function ensureAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
+  function playSound(type){
+    try {
+      const ctx = ensureAudioCtx();
+      if(ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+      const gainNode = ctx.createGain();
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(1200, now);
+      gainNode.connect(lp);
+      lp.connect(ctx.destination);
+      if(type === 'slash'){
+        gainNode.gain.setValueAtTime(0.06, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(360, now);
+        o.frequency.exponentialRampToValueAtTime(90, now + 0.09);
+        o.connect(gainNode); o.start(now); o.stop(now + 0.09);
+      }else if(type === 'dash'){
+        gainNode.gain.setValueAtTime(0.055, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(420, now);
+        o.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+        o.connect(gainNode); o.start(now); o.stop(now + 0.1);
+      }else if(type === 'arcane'){
+        gainNode.gain.setValueAtTime(0.05, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(480, now);
+        o.frequency.exponentialRampToValueAtTime(110, now + 0.08);
+        o.connect(gainNode); o.start(now); o.stop(now + 0.08);
+      }else if(type === 'footstep'){
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(90, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.05);
+        osc.connect(gainNode);
+        gainNode.gain.setValueAtTime(0.03, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+        osc.start(now);
+        osc.stop(now + 0.06);
+      }else if(type === 'block'){
+        gainNode.gain.setValueAtTime(0.045, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(520, now);
+        o.frequency.exponentialRampToValueAtTime(120, now + 0.06);
+        o.connect(gainNode); o.start(now); o.stop(now + 0.06);
+      }else if(type === 'hit'){
+        gainNode.gain.setValueAtTime(0.055, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(280, now);
+        o.frequency.exponentialRampToValueAtTime(80, now + 0.07);
+        o.connect(gainNode); o.start(now); o.stop(now + 0.07);
+      }
+    } catch (_) {}
+  }
+  function tryFootstep(stateTime, moving){
+    if(!moving) return;
+    if((footstepCooldown.t || 0) > stateTime) return;
+    footstepCooldown.t = stateTime + 0.22;
+    playSound('footstep');
+  }
   function syncEnemyGif(e, typeIdx, ox, oy, faceRight, overrideSrc){
     if(!e.gifEl){
       e.gifEl = document.createElement('img');
@@ -204,7 +276,7 @@
   }
   registerLoadingTask(playerWebpLoadTask);
   registerLoadingTask(enemyAttackFrameTask);
-  for(const img of [imgSlash,imgDashThrust,imgTile01,imgTile02,arcaneOrbImg,enemyAttackImg,heavyAttackImg,meleeAttackImg,playerGifEl]){
+  for(const img of [imgSlash,imgDashThrust,...imgTilesBrown,arcaneOrbImg,enemyAttackImg,heavyAttackImg,meleeAttackImg,playerGifEl]){
     registerLoadingTask(waitImageAsset(img));
   }
   // END - Modification 1
@@ -563,6 +635,7 @@
       particles.push({x:p.x,y:p.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,age:0,life:0.25+Math.random()*0.2,size:2+Math.random()*2});
     }
     (state.blockFx=state.blockFx||[]).push({particles,cx:p.x,cy:p.y,t:0.45,life:0.45});
+    playSound('block');
   }
   function tryBlockDamage(p){
     const lv=Math.max(0,p.blockLv||0);
@@ -942,6 +1015,7 @@
     return getNearestEnemyToPoint(c.cx, c.cy);
   }
   function fireArcaneShot(player, dmg){
+    playSound('arcane');
     const target=getNearestEnemyToPlayer();
     const facing=getPlayerFacing();
     let dirX=facing.x, dirY=facing.y;
@@ -1382,6 +1456,7 @@
     p.x+=safeFinite(p.vx*dt,0);
     p.y+=safeFinite(p.vy*dt,0);
     resolvePlayerEnemyPush(p,state.enemies,inputVX,inputVY);
+    tryFootstep(state.time, Math.hypot(ix,iy) > 0.01 && Math.hypot(p.vx,p.vy) > 8);
 
     state.cam.x=p.x-vw/2; state.cam.y=p.y-vh/2;
     const xpBar = getXpBarRect();
@@ -1430,7 +1505,7 @@
         radius:SLASH_AXE_CFG.radius,trail:SLASH_AXE_CFG.trailFrames
       }));
     };
-    if(p.skills.slash>0&&p.cds.slash<=0&&(state.slashes||[]).length===0){ const lv=p.skills.slash; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash; const c=getPlayerCenter(p); spawnSlashRing(c, lv, dmg, 140, 84); p.cds.slash=0.75/scaleLv(lv); }
+    if(p.skills.slash>0&&p.cds.slash<=0&&(state.slashes||[]).length===0){ const lv=p.skills.slash; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash; const c=getPlayerCenter(p); spawnSlashRing(c, lv, dmg, 140, 84); playSound('slash'); p.cds.slash=0.75/scaleLv(lv); }
     if(p.skills.arcane>0&&p.cds.arcane<=0){
       const lv=p.skills.arcane;
       const count=Math.max(1,lv);
@@ -1448,7 +1523,7 @@
       }
       if(state.arcaneBurst&&state.arcaneBurst.shotsLeft<=0) state.arcaneBurst=null;
     }
-    if(p.skills.dash>0&&p.cds.dash<=0){ const lv=p.skills.dash; const dashLife=0.5; const dashMaxLen=vw*COMBAT_TUNING.dash.lenBaseRatio + (lv-1)*COMBAT_TUNING.dash.lenPerLv; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.dash; const dashWidth=COMBAT_TUNING.dash.widthBase + (lv-1)*COMBAT_TUNING.dash.widthPerLv; const best=calcDashBestDir(p,dashMaxLen,dashWidth); const dir=normalizeDir(best.dir.x,best.dir.y,p.lastFacing?.x||1,p.lastFacing?.y||0); p.lastDashDir={x:dir.x,y:dir.y}; const spriteSize=COMBAT_TUNING.dash.spriteBase + (lv-1)*COMBAT_TUNING.dash.spritePerLv; const knockback=COMBAT_TUNING.dash.knockbackBase+(lv-1)*COMBAT_TUNING.dash.knockbackPerLv; const knockbackDur=COMBAT_TUNING.dash.knockbackDurBase+(lv-1)*COMBAT_TUNING.dash.knockbackDurPerLv; state.dashFx.push({startX:p.x,startY:p.y,dirX:dir.x,dirY:dir.y,t:dashLife,life:dashLife,dmg,maxLen:dashMaxLen,width:dashWidth,spriteSize,knockback,knockbackDur}); state.dashAimDebug.bestHit=best.count|0; state.dashAimDebug.bestDeg=((Math.atan2(dir.y,dir.x)*180/Math.PI+360)%360); p.cds.dash=2.2/scaleLv(lv); }
+    if(p.skills.dash>0&&p.cds.dash<=0){ const lv=p.skills.dash; const dashLife=0.5; const dashMaxLen=vw*COMBAT_TUNING.dash.lenBaseRatio + (lv-1)*COMBAT_TUNING.dash.lenPerLv; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.dash; const dashWidth=COMBAT_TUNING.dash.widthBase + (lv-1)*COMBAT_TUNING.dash.widthPerLv; const best=calcDashBestDir(p,dashMaxLen,dashWidth); const dir=normalizeDir(best.dir.x,best.dir.y,p.lastFacing?.x||1,p.lastFacing?.y||0); p.lastDashDir={x:dir.x,y:dir.y}; const spriteSize=COMBAT_TUNING.dash.spriteBase + (lv-1)*COMBAT_TUNING.dash.spritePerLv; const knockback=COMBAT_TUNING.dash.knockbackBase+(lv-1)*COMBAT_TUNING.dash.knockbackPerLv; const knockbackDur=COMBAT_TUNING.dash.knockbackDurBase+(lv-1)*COMBAT_TUNING.dash.knockbackDurPerLv; state.dashFx.push({startX:p.x,startY:p.y,dirX:dir.x,dirY:dir.y,t:dashLife,life:dashLife,dmg,maxLen:dashMaxLen,width:dashWidth,spriteSize,knockback,knockbackDur}); playSound('dash'); state.dashAimDebug.bestHit=best.count|0; state.dashAimDebug.bestDeg=((Math.atan2(dir.y,dir.x)*180/Math.PI+360)%360); p.cds.dash=2.2/scaleLv(lv); }
 
     for(let i=0;i<(state.enemies||[]).length;i++){ const e = state.enemies[i]; safeClampSpeed(e); const knocked=(e.dashKnockbackUntil||0)>(state.time||0);
       const d=dist(e.x,e.y,p.x,p.y); const a=Math.atan2(p.y-e.y,p.x-e.x);
@@ -1461,17 +1536,17 @@
       e.x=safeFinite(e.x,0); e.y=safeFinite(e.y,0);
       if(e.flying){
         e.flyingAttackCd=Math.max(0,(e.flyingAttackCd||0)-dt);
-        if(meleePlayerInRange(e,p)&&(e.flyingAttackCd||0)<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.flying.contactDmg; p.hitCd=0.2; } e.flyingAttackCd=e.attackCd||COMBAT_TUNING.enemy.flying.attackCd; (state.flyingClawFx=state.flyingClawFx||[]).push(spawnFlyingClawFx(e.x,e.y)); }
+        if(meleePlayerInRange(e,p)&&(e.flyingAttackCd||0)<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.flying.contactDmg; p.hitCd=0.2; playSound('hit'); } e.flyingAttackCd=e.attackCd||COMBAT_TUNING.enemy.flying.attackCd; (state.flyingClawFx=state.flyingClawFx||[]).push(spawnFlyingClawFx(e.x,e.y)); }
       }else if(e.heavy){
         if(enemyInMeleeAttackZone(e,p)&&(e.heavyAttackCd||0)<=0&&(e.attackAnimUntil||0)<=(state.time||0)){ e.heavyAttackCd=e.attackCd||COMBAT_TUNING.enemy.heavy.attackCd; e.attackAnimUntil=Math.max((e.attackAnimUntil||0),(state.time||0)+HEAVY_ATTACK_DUR); e.heavyDamageDealt=false; (state.heavyExplosions=state.heavyExplosions||[]).push(spawnHeavyExplosion(e)); if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84); p.cds.thorns=0.35; } }
         const heavyInAnim=(e.attackAnimUntil||0)>(state.time||0);
         const heavyLatterHalf=heavyInAnim&&((e.attackAnimUntil||0)-(state.time||0))<=HEAVY_ATTACK_DUR*0.5;
-        if(heavyLatterHalf&&!e.heavyDamageDealt&&enemyInMeleeAttackZone(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.heavy.contactDmg; p.hitCd=0.45; } e.heavyDamageDealt=true; }
+        if(heavyLatterHalf&&!e.heavyDamageDealt&&enemyInMeleeAttackZone(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.heavy.contactDmg; p.hitCd=0.45; playSound('hit'); } e.heavyDamageDealt=true; }
       }else if(!e.ranged&&!e.flying){
         e.meleeAttackCd=Math.max(0,(e.meleeAttackCd||0)-dt);
         if(meleePlayerInRange(e,p)&&(e.meleeAttackCd||0)<=0&&(e.attackAnimUntil||0)<=(state.time||0)){ e.meleeAttackCd=e.attackCd||COMBAT_TUNING.enemy.melee.attackCd; e.attackAnimUntil=Math.max((e.attackAnimUntil||0),(state.time||0)+0.5); e.meleeDamageDealt=false; }
         const inAnim=(e.attackAnimUntil||0)>(state.time||0), latterHalf=inAnim&&((e.attackAnimUntil||0)-(state.time||0))<=0.25;
-        if(latterHalf&&!e.meleeDamageDealt&&meleePlayerInRange(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.melee.contactDmg; p.hitCd=0.45; } e.meleeDamageDealt=true; if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84); p.cds.thorns=0.35; } }
+        if(latterHalf&&!e.meleeDamageDealt&&meleePlayerInRange(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.melee.contactDmg; p.hitCd=0.45; playSound('hit'); } e.meleeDamageDealt=true; if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84); p.cds.thorns=0.35; } }
       }
       if(performance.now()-frameStart > COLLISION_SAFE.WATCHDOG_BUDGET_MS){ skipHeavyCollision=true; collDiag.watchdogTrips++; break; }
     }
@@ -1482,7 +1557,7 @@
       collDiag.skippedHeavy++;
     }
 
-    for(const b of (state.enemyBullets||[])){ if((b.homingLeft||0)>0){ b.homingLeft=Math.max(0,b.homingLeft-dt); const toPx=p.x-b.x, toPy=p.y-b.y; const dlen=Math.hypot(toPx,toPy)||1e-6; const tx=toPx/dlen, ty=toPy/dlen; const sp=b.speed||Math.hypot(b.vx,b.vy)||180; const cvx=b.vx/(sp||1), cvy=b.vy/(sp||1); const steer=clamp((b.homingStrength||8)*dt,0,0.28); let nx=cvx+(tx-cvx)*steer, ny=cvy+(ty-cvy)*steer; const nlen=Math.hypot(nx,ny)||1e-6; nx/=nlen; ny/=nlen; b.vx=nx*sp; b.vy=ny*sp; } b.x+=b.vx*dt; b.y+=b.vy*dt; if(dist(b.x,b.y,b.ox,b.oy)>PERF.BULLET_RANGE) b.dead=true; const bh=12; if(overlap({x:b.x-bh/2,y:b.y-bh/2,w:bh,h:bh},hbBottomThird(p))){ if(!tryBlockDamage(p)){ p.hp-=b.dmg; } b.dead=true; } }
+    for(const b of (state.enemyBullets||[])){ if((b.homingLeft||0)>0){ b.homingLeft=Math.max(0,b.homingLeft-dt); const toPx=p.x-b.x, toPy=p.y-b.y; const dlen=Math.hypot(toPx,toPy)||1e-6; const tx=toPx/dlen, ty=toPy/dlen; const sp=b.speed||Math.hypot(b.vx,b.vy)||180; const cvx=b.vx/(sp||1), cvy=b.vy/(sp||1); const steer=clamp((b.homingStrength||8)*dt,0,0.28); let nx=cvx+(tx-cvx)*steer, ny=cvy+(ty-cvy)*steer; const nlen=Math.hypot(nx,ny)||1e-6; nx/=nlen; ny/=nlen; b.vx=nx*sp; b.vy=ny*sp; } b.x+=b.vx*dt; b.y+=b.vy*dt; if(dist(b.x,b.y,b.ox,b.oy)>PERF.BULLET_RANGE) b.dead=true; const bh=12; if(overlap({x:b.x-bh/2,y:b.y-bh/2,w:bh,h:bh},hbBottomThird(p))){ if(!tryBlockDamage(p)){ p.hp-=b.dmg; playSound('hit'); } b.dead=true; } }
     for(const s of (state.slashes||[])){
       s.t-=dt;
       s.hitEnemies=s.hitEnemies||new Set();
@@ -1757,10 +1832,10 @@
     for(let y=sy;y<state.cam.y+vh+T;y+=T) for(let x=sx;x<state.cam.x+vw+T;x+=T){
       const gx=Math.floor(x/T), gy=Math.floor(y/T);
       const h=((gx*2654435761)^(gy*2246822519))>>>0;
-      const use01=(h%100)<70;
-      const img=use01?imgTile01:imgTile02;
+      const idx=h%5;
+      const img=imgTilesBrown[idx];
       if(img.complete&&img.naturalWidth) backCtx.drawImage(img,x+ox,y+oy,T,T);
-      else{ backCtx.fillStyle=use01?'#141821':'#10131a'; backCtx.fillRect(x+ox,y+oy,T-2,T-2); }
+      else{ backCtx.fillStyle='#141821'; backCtx.fillRect(x+ox,y+oy,T-2,T-2); }
     }
     // hide landmark blocks to keep battlefield clean
     ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,frontCanvas.width,frontCanvas.height); ctx.restore();
