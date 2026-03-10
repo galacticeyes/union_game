@@ -118,79 +118,52 @@
   const enemyAssetSrcs = ['rouge_webps/enemy_0.webp','rouge_webps/enemy_1.webp','rouge_webps/enemy_2.webp','rouge_webps/enemy_3.webp'];
   const enemyAttackSrcs = { melee: 'rouge_webps/enemy_attack_0.webp', heavy: 'rouge_webps/enemy_attack_2.webp' };
   const HEAVY_ATTACK_DUR = 1.0;
+  const BGM_AUDIO = 'bgm.mp3';
   let audioCtx = null;
-  const footstepCooldown = { t: 0 };
-  function ensureAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
-  function playSound(type){
-    try {
-      const ctx = ensureAudioCtx();
-      if(ctx.state === 'suspended') ctx.resume();
-      const now = ctx.currentTime;
-      const gainNode = ctx.createGain();
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.setValueAtTime(1200, now);
-      gainNode.connect(lp);
-      lp.connect(ctx.destination);
-      if(type === 'slash'){
-        gainNode.gain.setValueAtTime(0.06, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
-        const o = ctx.createOscillator();
-        o.type = 'sawtooth';
-        o.frequency.setValueAtTime(360, now);
-        o.frequency.exponentialRampToValueAtTime(90, now + 0.09);
-        o.connect(gainNode); o.start(now); o.stop(now + 0.09);
-      }else if(type === 'dash'){
-        gainNode.gain.setValueAtTime(0.055, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-        const o = ctx.createOscillator();
-        o.type = 'sawtooth';
-        o.frequency.setValueAtTime(420, now);
-        o.frequency.exponentialRampToValueAtTime(100, now + 0.1);
-        o.connect(gainNode); o.start(now); o.stop(now + 0.1);
-      }else if(type === 'arcane'){
-        gainNode.gain.setValueAtTime(0.05, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-        const o = ctx.createOscillator();
-        o.type = 'sawtooth';
-        o.frequency.setValueAtTime(480, now);
-        o.frequency.exponentialRampToValueAtTime(110, now + 0.08);
-        o.connect(gainNode); o.start(now); o.stop(now + 0.08);
-      }else if(type === 'footstep'){
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(90, now);
-        osc.frequency.exponentialRampToValueAtTime(60, now + 0.05);
-        osc.connect(gainNode);
-        gainNode.gain.setValueAtTime(0.03, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-        osc.start(now);
-        osc.stop(now + 0.06);
-      }else if(type === 'block'){
-        gainNode.gain.setValueAtTime(0.045, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-        const o = ctx.createOscillator();
-        o.type = 'sawtooth';
-        o.frequency.setValueAtTime(520, now);
-        o.frequency.exponentialRampToValueAtTime(120, now + 0.06);
-        o.connect(gainNode); o.start(now); o.stop(now + 0.06);
-      }else if(type === 'hit'){
-        gainNode.gain.setValueAtTime(0.055, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
-        const o = ctx.createOscillator();
-        o.type = 'sawtooth';
-        o.frequency.setValueAtTime(280, now);
-        o.frequency.exponentialRampToValueAtTime(80, now + 0.07);
-        o.connect(gainNode); o.start(now); o.stop(now + 0.07);
-      }
-    } catch (_) {}
+  let bgmEl = null;
+  function getAudioContext(){
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    return audioCtx;
   }
-  function tryFootstep(stateTime, moving){
-    if(!moving) return;
-    if((footstepCooldown.t || 0) > stateTime) return;
-    footstepCooldown.t = stateTime + 0.22;
-    playSound('footstep');
+  function playHitSound(){
+    const ctx = getAudioContext();
+    const fn = () => {
+      const t = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 320;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.28, t + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+      osc.start(t);
+      osc.stop(t + 0.06);
+    };
+    if(ctx.state === 'suspended') ctx.resume().then(fn).catch(()=>{});
+    else fn();
   }
+  function unlockAudioOnUserGesture(){
+    const ctx = getAudioContext();
+    if(ctx.state === 'suspended') ctx.resume().catch(()=>{});
+  }
+  function playBGM(){
+    if(!bgmEl) return;
+    bgmEl.loop = true;
+    bgmEl.volume = 0.25;
+    if(bgmEl.paused) bgmEl.play().catch(()=>{});
+  }
+  function stopBGM(){ if(bgmEl){ bgmEl.pause(); } }
+  (function initBGM(){
+    bgmEl = document.createElement('audio');
+    bgmEl.src = BGM_AUDIO;
+    bgmEl.preload = 'auto';
+    registerLoadingTask(new Promise(resolve => {
+      bgmEl.oncanplaythrough = () => resolve();
+      bgmEl.onerror = () => resolve();
+    }));
+  })();
   function syncEnemyGif(e, typeIdx, ox, oy, faceRight, overrideSrc){
     if(!e.gifEl){
       e.gifEl = document.createElement('img');
@@ -339,7 +312,12 @@
     if(state.dead&&k==='r') restart();
   });
   window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
-  frontCanvas.addEventListener('touchstart', (e)=>{
+  frontCanvas.addEventListener('mousedown', (e)=>{
+    unlockAudioOnUserGesture();
+    if(state.awaitingStart){ state.awaitingStart=false; hasStartedOnce=true; playBGM(); return; }
+  });
+  frontCanvas.addEventListener('touchstart', (e)=>{ unlockAudioOnUserGesture();
+    if(state.awaitingStart){ state.awaitingStart=false; hasStartedOnce=true; playBGM(); return; }
     if(state.paused||state.dead) return;
     if(touchMove.active) return;
     const t=e.changedTouches[0];
@@ -492,9 +470,9 @@
   function drawXpDrop(d, ox, oy){
     const x=d.x+ox, y=d.y+oy, r=d.r||4;
     ctx.save();
-    ctx.fillStyle='rgba(74,159,255,0.96)';
+    ctx.fillStyle='rgba(240,188,68,0.96)';
     ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='rgba(186,224,255,0.98)';
+    ctx.strokeStyle='rgba(255,236,155,0.98)';
     ctx.lineWidth=1;
     ctx.beginPath(); ctx.arc(x,y,Math.max(1,r-1),0,Math.PI*2); ctx.stroke();
     ctx.restore();
@@ -504,7 +482,7 @@
     if(p<=0) return;
     const s=Math.max(1,Math.round((fx.size||3)*p));
     const x=Math.floor(fx.x+ox)-s/2, y=Math.floor(fx.y+oy)-s/2;
-    ctx.fillStyle=`rgba(120,194,255,${0.9*p})`;
+    ctx.fillStyle=`rgba(255,214,112,${0.9*p})`;
     ctx.fillRect(x,y,s,s);
   }
   function enemyInMeleeAttackZone(e,p){
@@ -635,7 +613,6 @@
       particles.push({x:p.x,y:p.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,age:0,life:0.25+Math.random()*0.2,size:2+Math.random()*2});
     }
     (state.blockFx=state.blockFx||[]).push({particles,cx:p.x,cy:p.y,t:0.45,life:0.45});
-    playSound('block');
   }
   function tryBlockDamage(p){
     const lv=Math.max(0,p.blockLv||0);
@@ -1015,7 +992,6 @@
     return getNearestEnemyToPoint(c.cx, c.cy);
   }
   function fireArcaneShot(player, dmg){
-    playSound('arcane');
     const target=getNearestEnemyToPlayer();
     const facing=getPlayerFacing();
     let dirX=facing.x, dirY=facing.y;
@@ -1123,12 +1099,15 @@
     const flyingProb = clamp(0.09 + t*0.00034, 0.09, 0.23);
     return { heavyProb, rangedProb, flyingProb };
   }
+  let hasStartedOnce = false;
   function restart(){
     for(const e of (state.enemies||[])){ if(e.gifEl){ e.gifEl.remove(); e.gifEl=null; } }
-    Object.assign(state,{time:0,fps:0,fpsAcc:0,fpsCnt:0,paused:false,dead:false,kills:0,killStats:{melee:0,ranged:0,heavy:0,flying:0},cam:{x:0,y:0},enemies:[],enemyBullets:[],proj:[],slashes:[],dashFx:[],heavyExplosions:[],flyingClawFx:[],spikeFx:[],blockFx:[],xpDrops:[],xpFlyFx:[],arcaneBurst:null,cards:[],level:1,xp:0,xpNeed:20,combo:0,regenTick:0,spawnTimer:0,growthStepApplied:0,showCollBox:false,showCenterDebug:false,centerDiag:{pbVsHit:0,pbVsSpin:0,ok:true},nextEnemyId:1,orbRetargets:0,dashAimDebug:{bestHit:0,bestDeg:0}});
+    const awaiting = !hasStartedOnce;
+    Object.assign(state,{time:0,fps:0,fpsAcc:0,fpsCnt:0,paused:false,dead:false,awaitingStart:awaiting,kills:0,killStats:{melee:0,ranged:0,heavy:0,flying:0},cam:{x:0,y:0},enemies:[],enemyBullets:[],proj:[],slashes:[],dashFx:[],heavyExplosions:[],flyingClawFx:[],spikeFx:[],blockFx:[],xpDrops:[],xpFlyFx:[],arcaneBurst:null,cards:[],level:1,xp:0,xpNeed:20,combo:0,regenTick:0,spawnTimer:0,growthStepApplied:0,showCollBox:false,showCenterDebug:false,centerDiag:{pbVsHit:0,pbVsSpin:0,ok:true},nextEnemyId:1,orbRetargets:0,dashAimDebug:{bestHit:0,bestDeg:0}});
     state.player={x:0,y:0,w:128,h:128,vx:0,vy:0,hp:COMBAT_TUNING.player.baseHp,maxHp:COMBAT_TUNING.player.baseHp,speed:MANIFEST.physicsConfig.speedBase*90,hitCd:0,lifeSteal:COMBAT_TUNING.player.baseLifeSteal,regenLv:0,maxHpLv:0,moveLv:0,lifeStealLv:0,blockLv:1,
       atkLv:0, skills:{slash:1,dash:0,arcane:0}, cds:{slash:0,dash:0,arcane:0,thorns:0}, lastFacing:{x:1,y:0}, lastDashDir:{x:1,y:0}, isPlayer:true};
     makeLandmarks();
+    if(hasStartedOnce) playBGM();
   }
 
   function makeLandmarks(){ state.landmarks=[]; for(let i=1;i<=12;i++){ state.landmarks.push({x:200+(i%4)*500,y:180+Math.floor((i-1)/4)*700,s:80,id:'B'+i}); } }
@@ -1326,6 +1305,11 @@
       requestAnimationFrame(loop);
       return;
     }
+    if(state.awaitingStart){
+      render();
+      requestAnimationFrame(loop);
+      return;
+    }
     state.fpsAcc+=dt; state.fpsCnt++; if(state.fpsAcc>=0.5){state.fps=state.fpsCnt/state.fpsAcc; state.fpsAcc=0; state.fpsCnt=0;}
     if(!state.paused&&!state.dead) update(dt);
     render(); requestAnimationFrame(loop);
@@ -1456,7 +1440,6 @@
     p.x+=safeFinite(p.vx*dt,0);
     p.y+=safeFinite(p.vy*dt,0);
     resolvePlayerEnemyPush(p,state.enemies,inputVX,inputVY);
-    tryFootstep(state.time, Math.hypot(ix,iy) > 0.01 && Math.hypot(p.vx,p.vy) > 8);
 
     state.cam.x=p.x-vw/2; state.cam.y=p.y-vh/2;
     const xpBar = getXpBarRect();
@@ -1495,7 +1478,7 @@
     const scaleLv=l=>1 + Math.max(0,l-1)*0.08;
     const atkMul = 1 + p.atkLv * COMBAT_TUNING.player.atkPerLv;
     const SKILL_BASE_DMG = COMBAT_TUNING.skillBaseDmg * atkMul;
-    const spawnSlashRing = (center, lv, dmg, w, h) => {
+    const spawnSlashRing = (center, lv, dmg, w, h, isThorns) => {
       const slashCount = Math.max(1, lv|0);
       const base = Math.atan2(-1,0);
       const step = (Math.PI * 2) / slashCount;
@@ -1505,7 +1488,7 @@
         radius:SLASH_AXE_CFG.radius,trail:SLASH_AXE_CFG.trailFrames
       }));
     };
-    if(p.skills.slash>0&&p.cds.slash<=0&&(state.slashes||[]).length===0){ const lv=p.skills.slash; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash; const c=getPlayerCenter(p); spawnSlashRing(c, lv, dmg, 140, 84); playSound('slash'); p.cds.slash=0.75/scaleLv(lv); }
+    if(p.skills.slash>0&&p.cds.slash<=0&&(state.slashes||[]).length===0){ const lv=p.skills.slash; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash; const c=getPlayerCenter(p); spawnSlashRing(c, lv, dmg, 140, 84); p.cds.slash=0.75/scaleLv(lv); }
     if(p.skills.arcane>0&&p.cds.arcane<=0){
       const lv=p.skills.arcane;
       const count=Math.max(1,lv);
@@ -1523,7 +1506,7 @@
       }
       if(state.arcaneBurst&&state.arcaneBurst.shotsLeft<=0) state.arcaneBurst=null;
     }
-    if(p.skills.dash>0&&p.cds.dash<=0){ const lv=p.skills.dash; const dashLife=0.5; const dashMaxLen=vw*COMBAT_TUNING.dash.lenBaseRatio + (lv-1)*COMBAT_TUNING.dash.lenPerLv; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.dash; const dashWidth=COMBAT_TUNING.dash.widthBase + (lv-1)*COMBAT_TUNING.dash.widthPerLv; const best=calcDashBestDir(p,dashMaxLen,dashWidth); const dir=normalizeDir(best.dir.x,best.dir.y,p.lastFacing?.x||1,p.lastFacing?.y||0); p.lastDashDir={x:dir.x,y:dir.y}; const spriteSize=COMBAT_TUNING.dash.spriteBase + (lv-1)*COMBAT_TUNING.dash.spritePerLv; const knockback=COMBAT_TUNING.dash.knockbackBase+(lv-1)*COMBAT_TUNING.dash.knockbackPerLv; const knockbackDur=COMBAT_TUNING.dash.knockbackDurBase+(lv-1)*COMBAT_TUNING.dash.knockbackDurPerLv; state.dashFx.push({startX:p.x,startY:p.y,dirX:dir.x,dirY:dir.y,t:dashLife,life:dashLife,dmg,maxLen:dashMaxLen,width:dashWidth,spriteSize,knockback,knockbackDur}); playSound('dash'); state.dashAimDebug.bestHit=best.count|0; state.dashAimDebug.bestDeg=((Math.atan2(dir.y,dir.x)*180/Math.PI+360)%360); p.cds.dash=2.2/scaleLv(lv); }
+    if(p.skills.dash>0&&p.cds.dash<=0){ const lv=p.skills.dash; const dashLife=0.5; const dashMaxLen=vw*COMBAT_TUNING.dash.lenBaseRatio + (lv-1)*COMBAT_TUNING.dash.lenPerLv; const dmg=SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.dash; const dashWidth=COMBAT_TUNING.dash.widthBase + (lv-1)*COMBAT_TUNING.dash.widthPerLv; const best=calcDashBestDir(p,dashMaxLen,dashWidth); const dir=normalizeDir(best.dir.x,best.dir.y,p.lastFacing?.x||1,p.lastFacing?.y||0); p.lastDashDir={x:dir.x,y:dir.y}; const spriteSize=COMBAT_TUNING.dash.spriteBase + (lv-1)*COMBAT_TUNING.dash.spritePerLv; const knockback=COMBAT_TUNING.dash.knockbackBase+(lv-1)*COMBAT_TUNING.dash.knockbackPerLv; const knockbackDur=COMBAT_TUNING.dash.knockbackDurBase+(lv-1)*COMBAT_TUNING.dash.knockbackDurPerLv; state.dashFx.push({startX:p.x,startY:p.y,dirX:dir.x,dirY:dir.y,t:dashLife,life:dashLife,dmg,maxLen:dashMaxLen,width:dashWidth,spriteSize,knockback,knockbackDur}); state.dashAimDebug.bestHit=best.count|0; state.dashAimDebug.bestDeg=((Math.atan2(dir.y,dir.x)*180/Math.PI+360)%360); p.cds.dash=2.2/scaleLv(lv); }
 
     for(let i=0;i<(state.enemies||[]).length;i++){ const e = state.enemies[i]; safeClampSpeed(e); const knocked=(e.dashKnockbackUntil||0)>(state.time||0);
       const d=dist(e.x,e.y,p.x,p.y); const a=Math.atan2(p.y-e.y,p.x-e.x);
@@ -1536,17 +1519,17 @@
       e.x=safeFinite(e.x,0); e.y=safeFinite(e.y,0);
       if(e.flying){
         e.flyingAttackCd=Math.max(0,(e.flyingAttackCd||0)-dt);
-        if(meleePlayerInRange(e,p)&&(e.flyingAttackCd||0)<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.flying.contactDmg; p.hitCd=0.2; playSound('hit'); } e.flyingAttackCd=e.attackCd||COMBAT_TUNING.enemy.flying.attackCd; (state.flyingClawFx=state.flyingClawFx||[]).push(spawnFlyingClawFx(e.x,e.y)); }
+        if(meleePlayerInRange(e,p)&&(e.flyingAttackCd||0)<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.flying.contactDmg; p.hitCd=0.2; } e.flyingAttackCd=e.attackCd||COMBAT_TUNING.enemy.flying.attackCd; (state.flyingClawFx=state.flyingClawFx||[]).push(spawnFlyingClawFx(e.x,e.y)); }
       }else if(e.heavy){
-        if(enemyInMeleeAttackZone(e,p)&&(e.heavyAttackCd||0)<=0&&(e.attackAnimUntil||0)<=(state.time||0)){ e.heavyAttackCd=e.attackCd||COMBAT_TUNING.enemy.heavy.attackCd; e.attackAnimUntil=Math.max((e.attackAnimUntil||0),(state.time||0)+HEAVY_ATTACK_DUR); e.heavyDamageDealt=false; (state.heavyExplosions=state.heavyExplosions||[]).push(spawnHeavyExplosion(e)); if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84); p.cds.thorns=0.35; } }
+        if(enemyInMeleeAttackZone(e,p)&&(e.heavyAttackCd||0)<=0&&(e.attackAnimUntil||0)<=(state.time||0)){ e.heavyAttackCd=e.attackCd||COMBAT_TUNING.enemy.heavy.attackCd; e.attackAnimUntil=Math.max((e.attackAnimUntil||0),(state.time||0)+HEAVY_ATTACK_DUR); e.heavyDamageDealt=false; (state.heavyExplosions=state.heavyExplosions||[]).push(spawnHeavyExplosion(e)); if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84, true); p.cds.thorns=0.35; } }
         const heavyInAnim=(e.attackAnimUntil||0)>(state.time||0);
         const heavyLatterHalf=heavyInAnim&&((e.attackAnimUntil||0)-(state.time||0))<=HEAVY_ATTACK_DUR*0.5;
-        if(heavyLatterHalf&&!e.heavyDamageDealt&&enemyInMeleeAttackZone(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.heavy.contactDmg; p.hitCd=0.45; playSound('hit'); } e.heavyDamageDealt=true; }
+        if(heavyLatterHalf&&!e.heavyDamageDealt&&enemyInMeleeAttackZone(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.heavy.contactDmg; p.hitCd=0.45; } e.heavyDamageDealt=true; }
       }else if(!e.ranged&&!e.flying){
         e.meleeAttackCd=Math.max(0,(e.meleeAttackCd||0)-dt);
         if(meleePlayerInRange(e,p)&&(e.meleeAttackCd||0)<=0&&(e.attackAnimUntil||0)<=(state.time||0)){ e.meleeAttackCd=e.attackCd||COMBAT_TUNING.enemy.melee.attackCd; e.attackAnimUntil=Math.max((e.attackAnimUntil||0),(state.time||0)+0.5); e.meleeDamageDealt=false; }
         const inAnim=(e.attackAnimUntil||0)>(state.time||0), latterHalf=inAnim&&((e.attackAnimUntil||0)-(state.time||0))<=0.25;
-        if(latterHalf&&!e.meleeDamageDealt&&meleePlayerInRange(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.melee.contactDmg; p.hitCd=0.45; playSound('hit'); } e.meleeDamageDealt=true; if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84); p.cds.thorns=0.35; } }
+        if(latterHalf&&!e.meleeDamageDealt&&meleePlayerInRange(e,p)&&p.hitCd<=0){ if(!tryBlockDamage(p)){ p.hp-=e.contactDmg||COMBAT_TUNING.enemy.melee.contactDmg; p.hitCd=0.45; } e.meleeDamageDealt=true; if(p.skills.slash>=8&&Math.random()<0.5&&p.cds.thorns<=0&&(state.slashes||[]).length===0){ const c=getPlayerCenter(p); spawnSlashRing(c, p.skills.slash, SKILL_BASE_DMG*COMBAT_TUNING.skillDmgMult.slash, 144, 84, true); p.cds.thorns=0.35; } }
       }
       if(performance.now()-frameStart > COLLISION_SAFE.WATCHDOG_BUDGET_MS){ skipHeavyCollision=true; collDiag.watchdogTrips++; break; }
     }
@@ -1557,7 +1540,7 @@
       collDiag.skippedHeavy++;
     }
 
-    for(const b of (state.enemyBullets||[])){ if((b.homingLeft||0)>0){ b.homingLeft=Math.max(0,b.homingLeft-dt); const toPx=p.x-b.x, toPy=p.y-b.y; const dlen=Math.hypot(toPx,toPy)||1e-6; const tx=toPx/dlen, ty=toPy/dlen; const sp=b.speed||Math.hypot(b.vx,b.vy)||180; const cvx=b.vx/(sp||1), cvy=b.vy/(sp||1); const steer=clamp((b.homingStrength||8)*dt,0,0.28); let nx=cvx+(tx-cvx)*steer, ny=cvy+(ty-cvy)*steer; const nlen=Math.hypot(nx,ny)||1e-6; nx/=nlen; ny/=nlen; b.vx=nx*sp; b.vy=ny*sp; } b.x+=b.vx*dt; b.y+=b.vy*dt; if(dist(b.x,b.y,b.ox,b.oy)>PERF.BULLET_RANGE) b.dead=true; const bh=12; if(overlap({x:b.x-bh/2,y:b.y-bh/2,w:bh,h:bh},hbBottomThird(p))){ if(!tryBlockDamage(p)){ p.hp-=b.dmg; playSound('hit'); } b.dead=true; } }
+    for(const b of (state.enemyBullets||[])){ if((b.homingLeft||0)>0){ b.homingLeft=Math.max(0,b.homingLeft-dt); const toPx=p.x-b.x, toPy=p.y-b.y; const dlen=Math.hypot(toPx,toPy)||1e-6; const tx=toPx/dlen, ty=toPy/dlen; const sp=b.speed||Math.hypot(b.vx,b.vy)||180; const cvx=b.vx/(sp||1), cvy=b.vy/(sp||1); const steer=clamp((b.homingStrength||8)*dt,0,0.28); let nx=cvx+(tx-cvx)*steer, ny=cvy+(ty-cvy)*steer; const nlen=Math.hypot(nx,ny)||1e-6; nx/=nlen; ny/=nlen; b.vx=nx*sp; b.vy=ny*sp; } b.x+=b.vx*dt; b.y+=b.vy*dt; if(dist(b.x,b.y,b.ox,b.oy)>PERF.BULLET_RANGE) b.dead=true; const bh=12; if(overlap({x:b.x-bh/2,y:b.y-bh/2,w:bh,h:bh},hbBottomThird(p))){ if(!tryBlockDamage(p)){ p.hp-=b.dmg; } b.dead=true; } }
     for(const s of (state.slashes||[])){
       s.t-=dt;
       s.hitEnemies=s.hitEnemies||new Set();
@@ -1570,6 +1553,7 @@
         if(!overlap(slashHitbox, hbBottomThird(e))) continue;
         const ex=e.x-c.cx, ey=e.y-c.cy;
         s.hitEnemies.add(e);
+        playHitSound();
         const pre=e.hp; e.hp-=s.dmg; const dealt=Math.max(0,Math.min(pre,s.dmg)); const heal=Math.max(0.5,dealt*p.lifeSteal); p.hp=Math.min(p.maxHp,p.hp+heal);
         const slv=Math.max(1,slashLv|0);
         const kpow=120 + slv*18;
@@ -1581,7 +1565,7 @@
         (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('slash', e.x,e.y));
       }
     }
-    for(const pr of (state.proj||[])){ applyOrbHoming(pr, dt); pr.x+=pr.vx*dt; pr.y+=pr.vy*dt; for(const e of (state.enemies||[])){ if(overlap(getArcaneOrbHitbox(pr),hbBottomThird(e))){ const pre=e.hp; e.hp-=pr.dmg; const dealt=Math.max(0,Math.min(pre,pr.dmg)); p.hp=Math.min(p.maxHp,p.hp+Math.max(0.5,dealt*p.lifeSteal)); (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('arcane', e.x, e.y)); pr.dead=true; break; } } }
+    for(const pr of (state.proj||[])){ applyOrbHoming(pr, dt); pr.x+=pr.vx*dt; pr.y+=pr.vy*dt; for(const e of (state.enemies||[])){ if(overlap(getArcaneOrbHitbox(pr),hbBottomThird(e))){ playHitSound(); const pre=e.hp; e.hp-=pr.dmg; const dealt=Math.max(0,Math.min(pre,pr.dmg)); p.hp=Math.min(p.maxHp,p.hp+Math.max(0.5,dealt*p.lifeSteal)); (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('arcane', e.x, e.y)); pr.dead=true; break; } } }
     for(const d of (state.dashFx||[])){
       d.t-=dt;
       const dashBoxes = getDashStampHitboxes(d);
@@ -1591,7 +1575,7 @@
         let hit=false;
         for(const hb of dashBoxes){ if(overlap(hb, eb)){ hit=true; break; } }
         if(!hit) continue;
-        if(!(d.hitEnemies||(d.hitEnemies=new Set())).has(e)){ d.hitEnemies.add(e); e.hp-=d.dmg; const kb=d.knockback||MANIFEST.physicsConfig.knockback; e.vx=(e.vx||0)+d.dirX*kb; e.vy=(e.vy||0)+d.dirY*kb; e.x+=d.dirX*14; e.y+=d.dirY*14; e.dashKnockbackUntil=(state.time||0)+(d.knockbackDur||0.2); (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('dash', e.x, e.y)); }
+        if(!(d.hitEnemies||(d.hitEnemies=new Set())).has(e)){ d.hitEnemies.add(e); playHitSound(); e.hp-=d.dmg; const kb=d.knockback||MANIFEST.physicsConfig.knockback; e.vx=(e.vx||0)+d.dirX*kb; e.vy=(e.vy||0)+d.dirY*kb; e.x+=d.dirX*14; e.y+=d.dirY*14; e.dashKnockbackUntil=(state.time||0)+(d.knockbackDur||0.2); (state.spikeFx=state.spikeFx||[]).push(spawnSpikeKnockFx('dash', e.x, e.y)); }
       }
     }
     for(const hx of (state.heavyExplosions||[])){ hx.t-=dt; }
@@ -1602,7 +1586,7 @@
     state.enemyBullets=(state.enemyBullets||[]).filter(b=>!b.dead); state.slashes=(state.slashes||[]).filter(s=>s&&s.t>0); state.proj=(state.proj||[]).filter(pj=>pj&&!pj.dead); state.dashFx=(state.dashFx||[]).filter(d=>d&&d.t>0); state.heavyExplosions=(state.heavyExplosions||[]).filter(h=>h&&h.t>0); state.flyingClawFx=(state.flyingClawFx||[]).filter(c=>c&&c.t>0); state.spikeFx=(state.spikeFx||[]).filter(c=>c&&c.t>0); state.blockFx=(state.blockFx||[]).filter(c=>c&&c.t>0); state.xpDrops=(state.xpDrops||[]).filter(d=>!d.dead); state.xpFlyFx=(state.xpFlyFx||[]).filter(f=>(f.age||0)<(f.life||0.25));
     state.enemies=(state.enemies||[]).filter(e=>{ if(e.hp<=0){ if(e.gifEl){ e.gifEl.remove(); e.gifEl=null; } state.kills++; state.combo++; const cls=e.enemyClass||'melee'; if(state.killStats&&state.killStats[cls]!=null) state.killStats[cls]++; spawnXpDropsFromEnemy(e); return false;} return true;});
     state.regenTick+=dt; if(state.regenTick>=0.5){ state.regenTick=0; const regen=COMBAT_TUNING.player.regenPerTick*(1+state.player.regenLv*COMBAT_TUNING.player.regenPerLv); state.player.hp=Math.min(state.player.maxHp,state.player.hp+regen); }
-    if(state.player.hp<=0){ state.player.hp=0; state.dead=true; state.paused=true; state.restartBtn={x:195,y:620,w:150,h:44}; }
+    if(state.player.hp<=0){ state.player.hp=0; state.dead=true; state.paused=true; state.restartBtn={x:195,y:620,w:150,h:44}; stopBGM(); }
   }
 
   function rect(x,y,w,h,c){ ctx.fillStyle=c; ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h)); }
@@ -1940,7 +1924,7 @@
     const topBarY = 10;
     drawHpBar(topBarX, topBarY, topBarW, topBarH, p.hp/Math.max(1,p.maxHp), '#36d26b');
     const xpBar = getXpBarRect();
-    drawHpBar(xpBar.x, xpBar.y, xpBar.w, xpBar.h, state.xp/Math.max(1,state.xpNeed), '#4a9fff', 'rgba(13,23,43,0.78)', 'rgba(186,224,255,0.85)');
+    drawHpBar(xpBar.x, xpBar.y, xpBar.w, xpBar.h, state.xp/Math.max(1,state.xpNeed), '#f0be42', 'rgba(35,28,16,0.78)', 'rgba(255,230,150,0.85)');
     ctx.fillStyle = '#fff';
     ctx.fillText(`HP ${Math.ceil(p.hp)}/${Math.ceil(p.maxHp)}  LV ${state.level}`, topBarX + 70, topBarY + topBarH + 14);
     ctx.fillText(`XP ${state.xp}/${state.xpNeed}`, xpBar.x + 118, xpBar.y + xpBar.h + 14);
@@ -1966,6 +1950,16 @@
       ctx.fillText('MOVE', bx-18, by+4);
     }
 
+    if(state.awaitingStart){
+      rect(0,0,vw,vh,'rgba(0,0,0,0.55)');
+      ctx.fillStyle='#fff';
+      ctx.font='bold 24px monospace';
+      ctx.textAlign='center';
+      ctx.fillText('单击开始游戏', vw/2, vh/2-10);
+      ctx.font='16px monospace';
+      ctx.fillText('(点击任意位置)', vw/2, vh/2+20);
+      ctx.textAlign='left';
+    }
     if(state.paused&&!state.dead){
       rect(0,0,vw,vh,'rgba(0,0,0,0.45)');
       ctx.fillStyle='#fff';
